@@ -177,8 +177,24 @@ export class ItemVisualManager {
     this.boxesGroup = new THREE.Group();
     this.root.add(this.boxesGroup);
 
+    this.coinsGroup = new THREE.Group();
+    this.root.add(this.coinsGroup);
+
     this.disposables = [];
     this.textures = [];
+
+    // Shared 3D Collectible Gold Coin assets
+    this.coinDiscGeo = new THREE.CylinderGeometry(0.46, 0.46, 0.12, 16);
+    this.coinDiscGeo.rotateX(Math.PI / 2);
+    this.coinBarGeo = new THREE.BoxGeometry(0.12, 0.42, 0.16);
+    this.coinMat = new THREE.MeshStandardMaterial({
+      color: 0xffd700,
+      emissive: 0xd97706,
+      emissiveIntensity: 0.45,
+      metalness: 0.8,
+      roughness: 0.18,
+    });
+    this.disposables.push(this.coinDiscGeo, this.coinBarGeo, this.coinMat);
 
     // Shared Item Box assets
     const crystalTex = createCrystalBoxTexture();
@@ -347,9 +363,142 @@ export class ItemVisualManager {
     );
 
     this.itemBoxes = [];
+    this.coins = [];
     this.projectilesMap = new Map();
     this.explosionsMap = new Map();
     this.currentTrackId = null;
+
+    // Pre-allocated scratch objects & reusable Sets (zero per-frame GC)
+    this._dummy = new THREE.Object3D();
+    this._tmpColor = new THREE.Color();
+    this._zeroMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+    this._activeBoxSet = new Set();
+    this._activeCoinSet = new Set();
+    this._seenProjIds = new Set();
+    this._seenExpIds = new Set();
+    this._hasSyncedPickups = false;
+
+    // Rainbow Crystal Shard Burst Pool (? Box pickup VFX)
+    const SHARD_COUNT = 64;
+    const shardGeo = new THREE.OctahedronGeometry(0.24, 0);
+    const shardMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.92,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.crystalShardInst = new THREE.InstancedMesh(shardGeo, shardMat, SHARD_COUNT);
+    this.crystalShardInst.frustumCulled = false;
+    this.crystalShards = [];
+    this._tmpColor.setHex(0xffffff);
+    for (let i = 0; i < SHARD_COUNT; i++) {
+      this.crystalShardInst.setMatrixAt(i, this._zeroMatrix);
+      this.crystalShardInst.setColorAt(i, this._tmpColor);
+      this.crystalShards.push({
+        active: false,
+        age: 0,
+        life: 0.52,
+        x: 0,
+        y: 0,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+        rx: 0,
+        ry: 0,
+        scale: 1,
+      });
+    }
+    this.crystalShardInst.instanceMatrix.needsUpdate = true;
+    if (this.crystalShardInst.instanceColor) this.crystalShardInst.instanceColor.needsUpdate = true;
+    this.root.add(this.crystalShardInst);
+    this.disposables.push(shardGeo, shardMat, this.crystalShardInst);
+
+    // Jumping Gold Coin + Spark Pool (Coin pickup VFX)
+    this.coinJumpPool = [];
+    for (let i = 0; i < 6; i++) {
+      const grp = new THREE.Group();
+      const disc = new THREE.Mesh(this.coinDiscGeo, this.coinMat);
+      const bar = new THREE.Mesh(this.coinBarGeo, this.coinMat);
+      grp.add(disc, bar);
+      grp.visible = false;
+      this.root.add(grp);
+      this.coinJumpPool.push({
+        group: grp,
+        active: false,
+        age: 0,
+        life: 0.46,
+        x: 0,
+        y: 0,
+        z: 0,
+        vy: 0,
+      });
+    }
+
+    const COIN_SPARK_COUNT = 48;
+    const coinSparkGeo = new THREE.OctahedronGeometry(0.14, 0);
+    const coinSparkMat = new THREE.MeshBasicMaterial({
+      color: 0xffec4f,
+      transparent: true,
+      opacity: 0.95,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.coinSparkInst = new THREE.InstancedMesh(coinSparkGeo, coinSparkMat, COIN_SPARK_COUNT);
+    this.coinSparkInst.frustumCulled = false;
+    this.coinSparks = [];
+    for (let i = 0; i < COIN_SPARK_COUNT; i++) {
+      this.coinSparkInst.setMatrixAt(i, this._zeroMatrix);
+      this.coinSparks.push({
+        active: false,
+        age: 0,
+        life: 0.42,
+        x: 0,
+        y: 0,
+        z: 0,
+        vx: 0,
+        vy: 0,
+        vz: 0,
+      });
+    }
+    this.coinSparkInst.instanceMatrix.needsUpdate = true;
+    this.root.add(this.coinSparkInst);
+    this.disposables.push(coinSparkGeo, coinSparkMat, this.coinSparkInst);
+
+    // Luminous Shell Wake / Trail Pool (Green, Red & Blue Shells)
+    const SHELL_TRAIL_COUNT = 150;
+    const trailGeo = new THREE.SphereGeometry(0.28, 7, 6);
+    const trailMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    this.shellTrailInst = new THREE.InstancedMesh(trailGeo, trailMat, SHELL_TRAIL_COUNT);
+    this.shellTrailInst.frustumCulled = false;
+    this.shellTrails = [];
+    this._shellTrailCursor = 0;
+    this._tmpColor.setHex(0x4ade80);
+    for (let i = 0; i < SHELL_TRAIL_COUNT; i++) {
+      this.shellTrailInst.setMatrixAt(i, this._zeroMatrix);
+      this.shellTrailInst.setColorAt(i, this._tmpColor);
+      this.shellTrails.push({
+        active: false,
+        age: 0,
+        life: 0.32,
+        x: 0,
+        y: 0,
+        z: 0,
+        vy: 0,
+        baseScale: 1,
+      });
+    }
+    this.shellTrailInst.instanceMatrix.needsUpdate = true;
+    if (this.shellTrailInst.instanceColor) this.shellTrailInst.instanceColor.needsUpdate = true;
+    this.root.add(this.shellTrailInst);
+    this.disposables.push(trailGeo, trailMat, this.shellTrailInst);
 
     this.rebuildForTrack(initialTrackId);
   }
@@ -358,9 +507,12 @@ export class ItemVisualManager {
     if (this.currentTrackId === trackId && this.itemBoxes.length > 0) return;
     this.currentTrackId = trackId;
 
-    // Clear old item box instances
+    // Clear old item box & coin instances
     while (this.boxesGroup.children.length > 0) {
       this.boxesGroup.remove(this.boxesGroup.children[0]);
+    }
+    while (this.coinsGroup.children.length > 0) {
+      this.coinsGroup.remove(this.coinsGroup.children[0]);
     }
     this.clearTransientFX();
 
@@ -404,6 +556,26 @@ export class ItemVisualManager {
         phase: index * 0.85,
       };
     });
+
+    const coinSpots = meta?.coinSpots || [];
+    this.coins = coinSpots.map((spot) => {
+      const container = new THREE.Group();
+      const baseY = (spot.y || 0) + 0.72;
+      container.position.set(spot.x, baseY, spot.z);
+      const disc = new THREE.Mesh(this.coinDiscGeo, this.coinMat);
+      const bar = new THREE.Mesh(this.coinBarGeo, this.coinMat);
+      container.add(disc, bar);
+      this.coinsGroup.add(container);
+      return {
+        id: spot.id,
+        mesh: container,
+        baseY,
+        x: spot.x,
+        z: spot.z,
+        active: true,
+      };
+    });
+    this._hasSyncedPickups = false;
   }
 
   clearTransientFX() {
@@ -419,6 +591,133 @@ export class ItemVisualManager {
       exp.ringMat.dispose();
     }
     this.explosionsMap.clear();
+
+    if (this.crystalShards) {
+      for (let i = 0; i < this.crystalShards.length; i++) {
+        this.crystalShards[i].active = false;
+        this.crystalShardInst.setMatrixAt(i, this._zeroMatrix);
+      }
+      this.crystalShardInst.instanceMatrix.needsUpdate = true;
+    }
+
+    if (this.coinJumpPool) {
+      for (let i = 0; i < this.coinJumpPool.length; i++) {
+        this.coinJumpPool[i].active = false;
+        this.coinJumpPool[i].group.visible = false;
+      }
+    }
+
+    if (this.coinSparks) {
+      for (let i = 0; i < this.coinSparks.length; i++) {
+        this.coinSparks[i].active = false;
+        this.coinSparkInst.setMatrixAt(i, this._zeroMatrix);
+      }
+      this.coinSparkInst.instanceMatrix.needsUpdate = true;
+    }
+
+    if (this.shellTrails) {
+      for (let i = 0; i < this.shellTrails.length; i++) {
+        this.shellTrails[i].active = false;
+        this.shellTrailInst.setMatrixAt(i, this._zeroMatrix);
+      }
+      this.shellTrailInst.instanceMatrix.needsUpdate = true;
+      this._shellTrailCursor = 0;
+    }
+  }
+
+  _spawnBoxBurst(x, y, z) {
+    const palette = [0xff4081, 0xffbe0b, 0x00f5d4, 0x38bdf8, 0xc084fc];
+    let spawned = 0;
+    let colorDirty = false;
+    for (let i = 0; i < this.crystalShards.length && spawned < 10; i++) {
+      const sh = this.crystalShards[i];
+      if (sh.active) continue;
+      const ang = (spawned / 10) * Math.PI * 2 + Math.random() * 0.45;
+      const spd = 4.5 + Math.random() * 4.5;
+      sh.active = true;
+      sh.age = 0;
+      sh.life = 0.46 + Math.random() * 0.16;
+      sh.x = x;
+      sh.y = y;
+      sh.z = z;
+      sh.vx = Math.cos(ang) * spd;
+      sh.vy = 4.8 + Math.random() * 4.2;
+      sh.vz = Math.sin(ang) * spd;
+      sh.rx = Math.random() * Math.PI;
+      sh.ry = Math.random() * Math.PI;
+      sh.scale = 0.85 + Math.random() * 0.55;
+
+      this._tmpColor.setHex(palette[(spawned + i) % palette.length]);
+      this.crystalShardInst.setColorAt(i, this._tmpColor);
+      colorDirty = true;
+      spawned++;
+    }
+    if (colorDirty && this.crystalShardInst.instanceColor) {
+      this.crystalShardInst.instanceColor.needsUpdate = true;
+    }
+  }
+
+  _spawnCoinBurst(x, y, z) {
+    for (let i = 0; i < this.coinJumpPool.length; i++) {
+      const cj = this.coinJumpPool[i];
+      if (!cj.active) {
+        cj.active = true;
+        cj.age = 0;
+        cj.life = 0.44;
+        cj.x = x;
+        cj.y = y;
+        cj.z = z;
+        cj.vy = 7.6;
+        cj.group.position.set(x, y, z);
+        cj.group.scale.setScalar(1.0);
+        cj.group.visible = true;
+        break;
+      }
+    }
+
+    let spawned = 0;
+    for (let i = 0; i < this.coinSparks.length && spawned < 8; i++) {
+      const sp = this.coinSparks[i];
+      if (sp.active) continue;
+      const ang = (spawned / 8) * Math.PI * 2 + Math.random() * 0.35;
+      const spd = 3.2 + Math.random() * 3.0;
+      sp.active = true;
+      sp.age = 0;
+      sp.life = 0.36 + Math.random() * 0.12;
+      sp.x = x;
+      sp.y = y + 0.1;
+      sp.z = z;
+      sp.vx = Math.cos(ang) * spd;
+      sp.vy = 3.8 + Math.random() * 3.2;
+      sp.vz = Math.sin(ang) * spd;
+      spawned++;
+    }
+  }
+
+  _spawnShellTrail(x, y, z, type) {
+    const idx = this._shellTrailCursor;
+    this._shellTrailCursor = (idx + 1) % this.shellTrails.length;
+    const tr = this.shellTrails[idx];
+    tr.active = true;
+    tr.age = 0;
+    tr.life = type === ITEMS.BLUE_SHELL || type === 'blue_shell' ? 0.38 : 0.28;
+    tr.x = x;
+    tr.y = y;
+    tr.z = z;
+    tr.vy = 0.45;
+    tr.baseScale = type === ITEMS.BLUE_SHELL || type === 'blue_shell' ? 1.25 : 0.92;
+
+    if (type === ITEMS.BLUE_SHELL || type === 'blue_shell') {
+      this._tmpColor.setHex(0x00e5ff);
+    } else if (type === ITEMS.RED_SHELL || type === 'red_shell') {
+      this._tmpColor.setHex(0xff3b30);
+    } else {
+      this._tmpColor.setHex(0x4ade80);
+    }
+    this.shellTrailInst.setColorAt(idx, this._tmpColor);
+    if (this.shellTrailInst.instanceColor) {
+      this.shellTrailInst.instanceColor.needsUpdate = true;
+    }
   }
 
   _createProjectileVisual(type) {
@@ -585,7 +884,11 @@ export class ItemVisualManager {
     // 1. Update `?` Item Boxes
     let activeSet = null;
     if (raceState && Array.isArray(raceState.activeItemBoxes)) {
-      activeSet = new Set(raceState.activeItemBoxes);
+      activeSet = this._activeBoxSet;
+      activeSet.clear();
+      for (let i = 0; i < raceState.activeItemBoxes.length; i++) {
+        activeSet.add(raceState.activeItemBoxes[i]);
+      }
     }
 
     for (let i = 0; i < this.itemBoxes.length; i++) {
@@ -600,6 +903,13 @@ export class ItemVisualManager {
       } else if (!shouldBeActive && box.active) {
         box.active = false;
         box.popTimer = 0;
+        if (this._hasSyncedPickups) {
+          this._spawnBoxBurst(
+            box.container.position.x,
+            box.container.position.y + 1.05,
+            box.container.position.z
+          );
+        }
       }
 
       if (box.active) {
@@ -633,9 +943,34 @@ export class ItemVisualManager {
       }
     }
 
+    // 1b. Update 3D Collectible Gold Coins
+    let activeCoinSet = null;
+    if (raceState && Array.isArray(raceState.activeCoins)) {
+      activeCoinSet = this._activeCoinSet;
+      activeCoinSet.clear();
+      for (let i = 0; i < raceState.activeCoins.length; i++) {
+        activeCoinSet.add(raceState.activeCoins[i]);
+      }
+    }
+    for (let i = 0; i < this.coins.length; i++) {
+      const coin = this.coins[i];
+      const visible = activeCoinSet ? activeCoinSet.has(coin.id) : true;
+      if (!visible && coin.active && this._hasSyncedPickups) {
+        this._spawnCoinBurst(coin.x, coin.baseY, coin.z);
+      }
+      coin.active = visible;
+      coin.mesh.visible = visible;
+      if (visible) {
+        coin.mesh.rotation.y = elapsed * 3.4 + coin.id * 0.5;
+        coin.mesh.position.y = coin.baseY + Math.sin(elapsed * 4.2 + coin.id) * 0.12;
+      }
+    }
+    this._hasSyncedPickups = true;
+
     // 2. Sync 3D Projectiles
     const projectiles = raceState?.projectiles || [];
-    const seenIds = new Set();
+    const seenIds = this._seenProjIds;
+    seenIds.clear();
 
     for (let i = 0; i < projectiles.length; i++) {
       const p = projectiles[i];
@@ -645,6 +980,7 @@ export class ItemVisualManager {
       let vis = this.projectilesMap.get(p.id);
       if (!vis) {
         vis = this._createProjectileVisual(p.type);
+        vis.trailTimer = 0;
         this.root.add(vis.group);
         this.projectilesMap.set(p.id, vis);
       }
@@ -665,11 +1001,28 @@ export class ItemVisualManager {
         if (vis.groundGlow) {
           vis.groundGlow.scale.setScalar(1.25 + Math.sin(elapsed * 18) * 0.25);
         }
+        vis.trailTimer += dt;
+        if (vis.trailTimer >= 0.028) {
+          vis.trailTimer = 0;
+          this._spawnShellTrail(p.x || 0, (p.y || 0) + 0.45, p.z || 0, p.type);
+        }
       } else {
         vis.spinner.rotation.y += dt * 21.0;
         vis.spinner.rotation.x = Math.sin(elapsed * 16 + vis.phase) * 0.07;
         if (vis.groundGlow) {
           vis.groundGlow.scale.setScalar(0.92 + Math.sin(elapsed * 14 + vis.phase) * 0.16);
+        }
+        if (
+          p.type === ITEMS.GREEN_SHELL ||
+          p.type === 'green_shell' ||
+          p.type === ITEMS.RED_SHELL ||
+          p.type === 'red_shell'
+        ) {
+          vis.trailTimer += dt;
+          if (vis.trailTimer >= 0.028) {
+            vis.trailTimer = 0;
+            this._spawnShellTrail(p.x || 0, (p.y || 0) + 0.36, p.z || 0, p.type);
+          }
         }
       }
     }
@@ -683,7 +1036,8 @@ export class ItemVisualManager {
 
     // 3. Sync Expanding Blue-Shell Shockwave Explosions (`raceState.explosions`)
     const explosions = raceState?.explosions || [];
-    const seenExpIds = new Set();
+    const seenExpIds = this._seenExpIds;
+    seenExpIds.clear();
 
     for (let i = 0; i < explosions.length; i++) {
       const exp = explosions[i];
@@ -720,6 +1074,101 @@ export class ItemVisualManager {
         ev.ringMat.dispose();
         this.explosionsMap.delete(id);
       }
+    }
+
+    // 4. Animate Pickup Bursts & Shell Trails (zero per-frame GC)
+    let shardDirty = false;
+    for (let i = 0; i < this.crystalShards.length; i++) {
+      const sh = this.crystalShards[i];
+      if (!sh.active) continue;
+      shardDirty = true;
+      sh.age += dt;
+      if (sh.age >= sh.life) {
+        sh.active = false;
+        this.crystalShardInst.setMatrixAt(i, this._zeroMatrix);
+        continue;
+      }
+      const prog = sh.age / sh.life;
+      sh.vy -= 14.5 * dt;
+      sh.x += sh.vx * dt;
+      sh.y += sh.vy * dt;
+      sh.z += sh.vz * dt;
+      sh.rx += dt * 11;
+      sh.ry += dt * 14;
+      this._dummy.position.set(sh.x, sh.y, sh.z);
+      this._dummy.rotation.set(sh.rx, sh.ry, 0);
+      this._dummy.scale.setScalar(Math.max(0.01, sh.scale * (1 - prog)));
+      this._dummy.updateMatrix();
+      this.crystalShardInst.setMatrixAt(i, this._dummy.matrix);
+    }
+    if (shardDirty) {
+      this.crystalShardInst.instanceMatrix.needsUpdate = true;
+    }
+
+    for (let i = 0; i < this.coinJumpPool.length; i++) {
+      const cj = this.coinJumpPool[i];
+      if (!cj.active) continue;
+      cj.age += dt;
+      if (cj.age >= cj.life) {
+        cj.active = false;
+        cj.group.visible = false;
+        continue;
+      }
+      const prog = cj.age / cj.life;
+      cj.vy -= 18 * dt;
+      cj.y += cj.vy * dt;
+      cj.group.position.set(cj.x, cj.y, cj.z);
+      cj.group.rotation.y += dt * 18;
+      cj.group.scale.setScalar(Math.max(0.05, (1 - prog * 0.75) * 1.15));
+    }
+
+    let coinSparkDirty = false;
+    for (let i = 0; i < this.coinSparks.length; i++) {
+      const sp = this.coinSparks[i];
+      if (!sp.active) continue;
+      coinSparkDirty = true;
+      sp.age += dt;
+      if (sp.age >= sp.life) {
+        sp.active = false;
+        this.coinSparkInst.setMatrixAt(i, this._zeroMatrix);
+        continue;
+      }
+      const prog = sp.age / sp.life;
+      sp.vy -= 12 * dt;
+      sp.x += sp.vx * dt;
+      sp.y += sp.vy * dt;
+      sp.z += sp.vz * dt;
+      this._dummy.position.set(sp.x, sp.y, sp.z);
+      this._dummy.rotation.set(elapsed * 8 + i, elapsed * 10, 0);
+      this._dummy.scale.setScalar(Math.max(0.01, 1 - prog));
+      this._dummy.updateMatrix();
+      this.coinSparkInst.setMatrixAt(i, this._dummy.matrix);
+    }
+    if (coinSparkDirty) {
+      this.coinSparkInst.instanceMatrix.needsUpdate = true;
+    }
+
+    let trailDirty = false;
+    for (let i = 0; i < this.shellTrails.length; i++) {
+      const tr = this.shellTrails[i];
+      if (!tr.active) continue;
+      trailDirty = true;
+      tr.age += dt;
+      if (tr.age >= tr.life) {
+        tr.active = false;
+        this.shellTrailInst.setMatrixAt(i, this._zeroMatrix);
+        continue;
+      }
+      const prog = tr.age / tr.life;
+      tr.y += tr.vy * dt;
+      this._dummy.position.set(tr.x, tr.y, tr.z);
+      this._dummy.rotation.set(0, 0, 0);
+      this._dummy.scale.setScalar(Math.max(0.02, tr.baseScale * (1 - prog)));
+      this._dummy.updateMatrix();
+      this.shellTrailInst.setMatrixAt(i, this._dummy.matrix);
+    }
+    if (trailDirty) {
+      this.shellTrailInst.instanceMatrix.needsUpdate = true;
     }
   }
 

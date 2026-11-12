@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import { RACE_CONFIG } from '../shared/constants.js';
-import { getTrackSample, getTrackSamples, getTrackMeta } from '../shared/trackData.js';
+import {
+  getTrackSample,
+  getTrackSamples,
+  getTrackMeta,
+  getBaseTrackId,
+  isArenaTrack,
+  ARENA_DATA,
+} from '../shared/trackData.js';
 
 /**
  * Push a quad (two triangles) oriented so its geometric normal aligns with (ox, oy, oz).
@@ -64,12 +71,13 @@ function isInsidePolygon(x, z, poly) {
 }
 
 function createSkyTexture(trackId) {
+  const baseId = getBaseTrackId(trackId);
   const canvas = document.createElement('canvas');
-  canvas.width = trackId === 'rainbow' ? 512 : 128;
+  canvas.width = baseId === 'rainbow' ? 512 : 128;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
 
-  if (trackId === 'neon') {
+  if (baseId === 'neon' || baseId === 'arena') {
     const grad = ctx.createLinearGradient(0, 0, 0, 512);
     grad.addColorStop(0.0, '#040210');
     grad.addColorStop(0.28, '#120732');
@@ -86,7 +94,42 @@ function createSkyTexture(trackId) {
     for (let i = 0; i < 90; i++) {
       ctx.fillRect(rng() * canvas.width, rng() * 210, 1.5, 1.5);
     }
-  } else if (trackId === 'rainbow') {
+  } else if (baseId === 'polar') {
+    // 'polar' Aurora twilight + frosty glacier sky
+    const grad = ctx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0.0, '#04142c');
+    grad.addColorStop(0.28, '#0c3559');
+    grad.addColorStop(0.46, '#22d3ee');
+    grad.addColorStop(0.52, '#a5f3fc');
+    grad.addColorStop(0.62, '#38bdf8');
+    grad.addColorStop(1.0, '#0c4a6e');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, 512);
+    const rng = mulberry32(1225);
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    for (let i = 0; i < 80; i++) ctx.fillRect(rng() * canvas.width, rng() * 200, 1.5, 1.5);
+  } else if (baseId === 'pinball') {
+    // 'pinball' Deep arcade cabinet magenta-indigo sky
+    const grad = ctx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0.0, '#120329');
+    grad.addColorStop(0.32, '#2d0c59');
+    grad.addColorStop(0.48, '#a855f7');
+    grad.addColorStop(0.54, '#f43f5e');
+    grad.addColorStop(1.0, '#0f0424');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, 512);
+  } else if (baseId === 'volcano') {
+    // 'volcano' Crimson caldera twilight
+    const grad = ctx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0.0, '#1a0605');
+    grad.addColorStop(0.26, '#4c0f0a');
+    grad.addColorStop(0.45, '#dc2626');
+    grad.addColorStop(0.52, '#fb923c');
+    grad.addColorStop(0.65, '#450a0a');
+    grad.addColorStop(1.0, '#1c0503');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, canvas.width, 512);
+  } else if (baseId === 'rainbow') {
     // Full 360 cosmic nebula + starfield above & below!
     const grad = ctx.createLinearGradient(0, 0, 0, 512);
     grad.addColorStop(0.0, '#050216');
@@ -171,15 +214,65 @@ function createSynthwaveSunTexture() {
   return tex;
 }
 
+function drawRacingLineWear(ctx, darkColor, highlightColor, count = 2) {
+  // Seamless longitudinal racing-line rubber grooves (wraps cleanly at y=0 / y=512)
+  const lanes = count === 2 ? [168, 344] : [256];
+  for (let l = 0; l < lanes.length; l++) {
+    const cx = lanes[l];
+    ctx.save();
+    ctx.lineCap = 'round';
+    // Soft outer tire wear band
+    ctx.strokeStyle = darkColor;
+    ctx.lineWidth = 54;
+    ctx.beginPath();
+    for (let y = 0; y <= 512; y += 16) {
+      const wave = Math.sin((y / 512) * Math.PI * 2 + l * 1.1) * 7;
+      if (y === 0) ctx.moveTo(cx + wave, y);
+      else ctx.lineTo(cx + wave, y);
+    }
+    ctx.stroke();
+
+    // Inner concentrated tire groove
+    ctx.lineWidth = 22;
+    ctx.beginPath();
+    for (let y = 0; y <= 512; y += 16) {
+      const wave = Math.sin((y / 512) * Math.PI * 2 + l * 1.1) * 7;
+      if (y === 0) ctx.moveTo(cx + wave, y);
+      else ctx.lineTo(cx + wave, y);
+    }
+    ctx.stroke();
+
+    if (highlightColor) {
+      ctx.strokeStyle = highlightColor;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      for (let y = 0; y <= 512; y += 16) {
+        const wave = Math.sin((y / 512) * Math.PI * 2 + l * 1.1) * 7;
+        if (y === 0) ctx.moveTo(cx + wave - 16, y);
+        else ctx.lineTo(cx + wave - 16, y);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 function createRoadTexture(trackId) {
+  const baseId = getBaseTrackId(trackId);
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 512;
   const ctx = canvas.getContext('2d');
 
-  if (trackId === 'neon') {
+  if (baseId === 'neon') {
     ctx.fillStyle = '#121528';
     ctx.fillRect(0, 0, 512, 512);
+
+    const rng = mulberry32(2049);
+    for (let i = 0; i < 1800; i++) {
+      ctx.fillStyle = rng() > 0.5 ? 'rgba(0, 245, 212, 0.035)' : 'rgba(6, 8, 20, 0.18)';
+      ctx.fillRect(rng() * 512, rng() * 512, 2, 2);
+    }
 
     // Subtle cyber grid lines on dark wet asphalt
     ctx.strokeStyle = 'rgba(0, 245, 212, 0.09)';
@@ -197,6 +290,9 @@ function createRoadTexture(trackId) {
       ctx.stroke();
     }
 
+    // Glossy racing-line rubber streaks on wet asphalt
+    drawRacingLineWear(ctx, 'rgba(4, 6, 18, 0.34)', 'rgba(0, 245, 212, 0.08)');
+
     // Glowing hot-pink edge lines
     ctx.fillStyle = '#f72585';
     ctx.fillRect(20, 0, 12, 512);
@@ -206,10 +302,82 @@ function createRoadTexture(trackId) {
     ctx.fillStyle = '#00f5d4';
     ctx.fillRect(250, 36, 12, 176);
     ctx.fillRect(250, 292, 12, 176);
-  } else if (trackId === 'rainbow') {
-    // Sparkling cosmic tile pattern multiplied with per-vertex rainbow colors!
-    ctx.fillStyle = '#e8ecff';
+  } else if (baseId === 'polar') {
+    // 'polar' Frosted packed-snow & glacier highway
+    ctx.fillStyle = '#cbe7f8';
     ctx.fillRect(0, 0, 512, 512);
+    const rng = mulberry32(9012);
+    for (let i = 0; i < 1800; i++) {
+      ctx.fillStyle = rng() > 0.5 ? 'rgba(255,255,255,0.32)' : 'rgba(56,189,248,0.16)';
+      ctx.fillRect(rng() * 512, rng() * 512, 3, 3);
+    }
+    // Packed snow / ice tire ruts along racing line
+    drawRacingLineWear(ctx, 'rgba(14, 116, 144, 0.14)', 'rgba(255, 255, 255, 0.35)');
+    ctx.fillStyle = '#0284c7';
+    ctx.fillRect(20, 0, 14, 512);
+    ctx.fillRect(478, 0, 14, 512);
+    ctx.fillStyle = '#38bdf8';
+    ctx.fillRect(250, 36, 12, 176);
+    ctx.fillRect(250, 292, 12, 176);
+  } else if (baseId === 'pinball') {
+    // 'pinball' Lacquered purple arcade table lane
+    ctx.fillStyle = '#241046';
+    ctx.fillRect(0, 0, 512, 512);
+    const rng = mulberry32(5522);
+    for (let i = 0; i < 1200; i++) {
+      ctx.fillStyle = rng() > 0.5 ? 'rgba(250, 204, 21, 0.04)' : 'rgba(10, 4, 24, 0.14)';
+      ctx.fillRect(rng() * 512, rng() * 512, 2, 2);
+    }
+    ctx.strokeStyle = 'rgba(250, 204, 21, 0.16)';
+    ctx.lineWidth = 4;
+    for (let y = 0; y < 512; y += 64) {
+      ctx.beginPath();
+      ctx.moveTo(40, y);
+      ctx.lineTo(256, y + 32);
+      ctx.lineTo(472, y);
+      ctx.stroke();
+    }
+    drawRacingLineWear(ctx, 'rgba(12, 4, 28, 0.28)', 'rgba(250, 204, 21, 0.09)');
+    ctx.fillStyle = '#facc15';
+    ctx.fillRect(18, 0, 14, 512);
+    ctx.fillRect(480, 0, 14, 512);
+    ctx.fillStyle = '#e879f9';
+    ctx.fillRect(250, 36, 12, 176);
+    ctx.fillRect(250, 292, 12, 176);
+  } else if (baseId === 'volcano') {
+    // 'volcano' Dark volcanic basalt rock with glowing ember cracks & soot grooves
+    ctx.fillStyle = '#2a1c19';
+    ctx.fillRect(0, 0, 512, 512);
+    const rng = mulberry32(6661);
+    for (let i = 0; i < 2200; i++) {
+      ctx.fillStyle = rng() > 0.45 ? 'rgba(15, 8, 6, 0.22)' : 'rgba(251, 146, 60, 0.045)';
+      ctx.fillRect(rng() * 512, rng() * 512, 2, 2);
+    }
+    ctx.strokeStyle = 'rgba(249, 115, 22, 0.36)';
+    ctx.lineWidth = 3;
+    for (let i = 0; i < 24; i++) {
+      ctx.beginPath();
+      const sx = 40 + rng() * 432;
+      const sy = rng() * 512;
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + (rng() - 0.5) * 80, sy + 40);
+      ctx.stroke();
+    }
+    drawRacingLineWear(ctx, 'rgba(12, 6, 4, 0.34)', 'rgba(249, 115, 22, 0.1)');
+    ctx.fillStyle = '#fb923c';
+    ctx.fillRect(20, 0, 12, 512);
+    ctx.fillRect(480, 0, 12, 512);
+    ctx.fillStyle = '#fde047';
+    ctx.fillRect(250, 36, 12, 176);
+    ctx.fillRect(250, 292, 12, 176);
+  } else if (baseId === 'rainbow') {
+    // Vivid 7-band Mario-Kart style rainbow highway + cosmic tile shimmer & stars!
+    const bands = ['#ff2e63', '#ff7a00', '#ffd600', '#00e676', '#00bbf9', '#5e60ce', '#b5179e'];
+    const bandW = (512 - 56) / bands.length;
+    for (let b = 0; b < bands.length; b++) {
+      ctx.fillStyle = bands[b];
+      ctx.fillRect(28 + b * bandW, 0, bandW + 1, 512);
+    }
 
     const cols = 8;
     const rows = 8;
@@ -217,35 +385,59 @@ function createRoadTexture(trackId) {
     const ch = 512 / rows;
     for (let r = 0; r < rows; r++) {
       for (let c = 0; c < cols; c++) {
-        ctx.fillStyle = (r + c) % 2 === 0 ? 'rgba(255,255,255,0.96)' : 'rgba(215,228,255,0.82)';
+        ctx.fillStyle = (r + c) % 2 === 0 ? 'rgba(255,255,255,0.22)' : 'rgba(20,10,55,0.14)';
         ctx.fillRect(c * cw + 2, r * ch + 2, cw - 4, ch - 4);
       }
     }
 
+    drawRacingLineWear(ctx, 'rgba(15, 10, 42, 0.12)', 'rgba(255, 255, 255, 0.22)');
+
+    // Twinkling starlight flecks across the track
+    ctx.fillStyle = 'rgba(255,255,255,0.88)';
+    for (let s = 0; s < 26; s++) {
+      const sx = ((s * 97 + 41) % 440) + 36;
+      const sy = (s * 73 + 19) % 500;
+      ctx.fillRect(sx, sy, 4, 4);
+    }
+
     // Golden starlight border rails
     ctx.fillStyle = '#fffbeb';
-    ctx.fillRect(14, 0, 14, 512);
-    ctx.fillRect(484, 0, 14, 512);
+    ctx.fillRect(10, 0, 18, 512);
+    ctx.fillRect(484, 0, 18, 512);
   } else {
-    // 'coco' Rich sunshine-arcade slate asphalt
+    // 'coco' Rich sunshine-arcade slate asphalt with multi-scale grain & racing-line rubber
     ctx.fillStyle = '#363b4e';
     ctx.fillRect(0, 0, 512, 512);
 
     const grooveGrad = ctx.createLinearGradient(0, 0, 512, 0);
-    grooveGrad.addColorStop(0.0, 'rgba(20, 24, 36, 0.25)');
+    grooveGrad.addColorStop(0.0, 'rgba(20, 24, 36, 0.28)');
     grooveGrad.addColorStop(0.22, 'rgba(255, 255, 255, 0.03)');
-    grooveGrad.addColorStop(0.5, 'rgba(18, 22, 34, 0.12)');
+    grooveGrad.addColorStop(0.5, 'rgba(18, 22, 34, 0.14)');
     grooveGrad.addColorStop(0.78, 'rgba(255, 255, 255, 0.03)');
-    grooveGrad.addColorStop(1.0, 'rgba(20, 24, 36, 0.25)');
+    grooveGrad.addColorStop(1.0, 'rgba(20, 24, 36, 0.28)');
     ctx.fillStyle = grooveGrad;
     ctx.fillRect(0, 0, 512, 512);
 
     const rng = mulberry32(4242);
-    for (let i = 0; i < 2000; i++) {
+    for (let i = 0; i < 3200; i++) {
       const x = rng() * 512;
       const y = rng() * 512;
-      ctx.fillStyle = rng() > 0.5 ? 'rgba(255,255,255,0.035)' : 'rgba(10,12,20,0.08)';
-      ctx.fillRect(x, y, 2, 2);
+      const sz = rng() > 0.85 ? 3 : 2;
+      ctx.fillStyle = rng() > 0.48 ? 'rgba(255,255,255,0.045)' : 'rgba(10,12,20,0.12)';
+      ctx.fillRect(x, y, sz, sz);
+    }
+
+    // Rubber tire-wear grooves on the racing line + subtle micro-skids
+    drawRacingLineWear(ctx, 'rgba(12, 14, 22, 0.26)', 'rgba(255, 255, 255, 0.04)');
+    ctx.strokeStyle = 'rgba(12, 14, 22, 0.16)';
+    ctx.lineWidth = 2;
+    for (let k = 0; k < 14; k++) {
+      const sx = 90 + rng() * 332;
+      const sy = rng() * 440;
+      ctx.beginPath();
+      ctx.moveTo(sx, sy);
+      ctx.lineTo(sx + (rng() - 0.5) * 18, sy + 28 + rng() * 36);
+      ctx.stroke();
     }
 
     ctx.fillStyle = '#f8fafc';
@@ -294,17 +486,30 @@ function createCheckeredLineTexture() {
 }
 
 function createGantryBannerTexture(trackId) {
+  const baseId = getBaseTrackId(trackId);
   const canvas = document.createElement('canvas');
   canvas.width = 1024;
   canvas.height = 256;
   const ctx = canvas.getContext('2d');
 
   const bg = ctx.createLinearGradient(0, 0, 1024, 256);
-  if (trackId === 'neon') {
+  if (baseId === 'neon') {
     bg.addColorStop(0.0, '#7209b7');
     bg.addColorStop(0.5, '#f72585');
     bg.addColorStop(1.0, '#3a0ca3');
-  } else if (trackId === 'rainbow') {
+  } else if (baseId === 'polar') {
+    bg.addColorStop(0.0, '#0284c7');
+    bg.addColorStop(0.5, '#38bdf8');
+    bg.addColorStop(1.0, '#0369a1');
+  } else if (baseId === 'pinball') {
+    bg.addColorStop(0.0, '#9333ea');
+    bg.addColorStop(0.5, '#facc15');
+    bg.addColorStop(1.0, '#db2777');
+  } else if (baseId === 'volcano') {
+    bg.addColorStop(0.0, '#b91c1c');
+    bg.addColorStop(0.5, '#f97316');
+    bg.addColorStop(1.0, '#7c2d12');
+  } else if (baseId === 'rainbow') {
     bg.addColorStop(0.0, '#ff2a54');
     bg.addColorStop(0.33, '#ffbe0b');
     bg.addColorStop(0.66, '#00f5d4');
@@ -334,7 +539,7 @@ function createGantryBannerTexture(trackId) {
   }
   ctx.fill();
   ctx.lineWidth = 8;
-  ctx.strokeStyle = trackId === 'neon' ? '#00f5d4' : '#ffd166';
+  ctx.strokeStyle = baseId === 'neon' ? '#00f5d4' : '#ffd166';
   ctx.stroke();
 
   ctx.textAlign = 'center';
@@ -347,18 +552,21 @@ function createGantryBannerTexture(trackId) {
   const txtGrad = ctx.createLinearGradient(0, 72, 0, 164);
   txtGrad.addColorStop(0, '#ffffff');
   txtGrad.addColorStop(0.55, '#ffe66d');
-  txtGrad.addColorStop(1, trackId === 'neon' ? '#00f5d4' : '#ff9f1c');
+  txtGrad.addColorStop(1, baseId === 'neon' ? '#00f5d4' : '#ff9f1c');
   ctx.fillStyle = txtGrad;
   ctx.fillText('★ POCKET KART ★', 512, 118);
 
   const subtitles = {
     coco: 'ÎLE COCO • SUNSHINE LAGOON',
+    polar: 'PIC POLAIRE • GLACIER AURORA',
     neon: 'NÉON DRIFT • CYBER TOKYO',
+    pinball: 'FLIPPER ARCADE • SUPER BUMPERS',
+    volcano: 'VOLCAN MAGMA • CALDEIRA',
     rainbow: 'ROUTE CÉLESTE • RAINBOW SKY',
   };
   ctx.font = '800 28px "Nunito", sans-serif';
-  ctx.fillStyle = trackId === 'neon' ? '#ff70a6' : '#56f0ff';
-  ctx.fillText(subtitles[trackId] || subtitles.coco, 512, 182);
+  ctx.fillStyle = baseId === 'neon' ? '#ff70a6' : '#56f0ff';
+  ctx.fillText(subtitles[baseId] || subtitles.coco, 512, 182);
 
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
@@ -521,6 +729,7 @@ function createCyberWindowsTexture() {
 }
 
 function createTurnChevronTexture(turnDir = 1, trackId = 'coco') {
+  const baseId = getBaseTrackId(trackId);
   const canvas = document.createElement('canvas');
   canvas.width = 512;
   canvas.height = 256;
@@ -530,14 +739,14 @@ function createTurnChevronTexture(turnDir = 1, trackId = 'coco') {
   ctx.fillStyle = '#0f172a';
   ctx.fillRect(0, 0, 512, 256);
 
-  const borderCol = trackId === 'neon' ? '#00f5d4' : '#ffbe0b';
+  const borderCol = baseId === 'neon' ? '#00f5d4' : '#ffbe0b';
   ctx.lineWidth = 16;
   ctx.strokeStyle = borderCol;
   ctx.strokeRect(8, 8, 496, 240);
 
   // 3 bold glowing directional chevrons (turnDir > 0 => '>>>' right, turnDir < 0 => '<<<' left)
   const arrowColors =
-    trackId === 'neon'
+    baseId === 'neon'
       ? ['#00f5d4', '#ffbe0b', '#f72585']
       : ['#ffe600', '#ff9e00', '#ff2a54'];
 
@@ -654,10 +863,201 @@ function buildJumpRampGeometry(width = 4.4, length = 5.2, lipHeight = 0.92) {
   return geo;
 }
 
-/**
- * Builds the entire 3D circuit + themed world for `'coco'`, `'neon'`, or `'rainbow'`.
- */
-export function buildTrackWorld(scene, trackId = 'coco') {
+function createAuroraTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  // Vertical soft fade (transparent at top & bottom, glowing curtains in middle)
+  const vGrad = ctx.createLinearGradient(0, 0, 0, 128);
+  vGrad.addColorStop(0.0, 'rgba(0, 0, 0, 0)');
+  vGrad.addColorStop(0.28, 'rgba(255, 255, 255, 0.55)');
+  vGrad.addColorStop(0.62, 'rgba(255, 255, 255, 0.95)');
+  vGrad.addColorStop(0.85, 'rgba(255, 255, 255, 0.4)');
+  vGrad.addColorStop(1.0, 'rgba(0, 0, 0, 0)');
+  ctx.fillStyle = vGrad;
+  ctx.fillRect(0, 0, 256, 128);
+
+  // Vertical curtain striations
+  ctx.globalCompositeOperation = 'source-atop';
+  for (let x = 0; x < 256; x += 4) {
+    const a = 0.35 + 0.55 * (0.5 + 0.5 * Math.sin(x * 0.14) * Math.cos(x * 0.07));
+    ctx.fillStyle = `rgba(255, 255, 255, ${a.toFixed(2)})`;
+    ctx.fillRect(x, 0, 3, 128);
+  }
+  ctx.globalCompositeOperation = 'source-over';
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  return tex;
+}
+
+function createHoloSignTexture(variant = 0) {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 128;
+  const ctx = canvas.getContext('2d');
+
+  const palettes = [
+    { main: '#00f5d4', sub: '#f72585', label: 'TOKYO DRIFT', kanji: '電脳高速' },
+    { main: '#f72585', sub: '#ffbe0b', label: 'TURBO ZONE', kanji: '加速全開' },
+    { main: '#38bdf8', sub: '#a855f7', label: 'CYBER GP', kanji: '未来軌道' },
+  ];
+  const pal = palettes[variant % palettes.length];
+
+  ctx.fillStyle = 'rgba(8, 12, 32, 0.42)';
+  ctx.fillRect(0, 0, 256, 128);
+
+  ctx.strokeStyle = pal.main;
+  ctx.lineWidth = 6;
+  ctx.strokeRect(6, 6, 244, 116);
+
+  ctx.strokeStyle = pal.sub;
+  ctx.lineWidth = 2;
+  ctx.strokeRect(14, 14, 228, 100);
+
+  // Horizontal hologram scanlines
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.08)';
+  for (let y = 8; y < 120; y += 6) {
+    ctx.fillRect(10, y, 236, 2);
+  }
+
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = pal.sub;
+  ctx.font = '800 22px "Nunito", sans-serif';
+  ctx.fillText(pal.kanji, 128, 42);
+
+  ctx.fillStyle = pal.main;
+  ctx.font = '900 28px "Fredoka", "Nunito", sans-serif';
+  ctx.fillText(pal.label, 128, 84);
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+function createLavaTexture() {
+  const canvas = document.createElement('canvas');
+  canvas.width = 256;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+
+  ctx.fillStyle = '#dc2626';
+  ctx.fillRect(0, 0, 256, 256);
+
+  const rng = mulberry32(9911);
+  // Bright yellow-orange magma veins
+  for (let i = 0; i < 38; i++) {
+    const x = rng() * 256;
+    const y = rng() * 256;
+    const r = 18 + rng() * 34;
+    const grad = ctx.createRadialGradient(x, y, 2, x, y, r);
+    grad.addColorStop(0.0, 'rgba(254, 240, 138, 0.92)');
+    grad.addColorStop(0.45, 'rgba(249, 115, 22, 0.68)');
+    grad.addColorStop(1.0, 'rgba(220, 38, 38, 0.0)');
+    ctx.fillStyle = grad;
+    for (const ox of [-256, 0, 256]) {
+      for (const oy of [-256, 0, 256]) {
+        ctx.beginPath();
+        ctx.arc(x + ox, y + oy, r, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  // Dark cooled basalt crust islands
+  ctx.fillStyle = 'rgba(41, 16, 12, 0.65)';
+  for (let i = 0; i < 24; i++) {
+    const x = rng() * 256;
+    const y = rng() * 256;
+    const rx = 8 + rng() * 18;
+    const ry = 6 + rng() * 14;
+    for (const ox of [-256, 0, 256]) {
+      for (const oy of [-256, 0, 256]) {
+        ctx.beginPath();
+        ctx.ellipse(x + ox, y + oy, rx, ry, rng() * Math.PI, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(22, 22);
+  return tex;
+}
+
+function buildSweepingSpotlights(root, spots, disposables, { beamLength = 44, topR = 0.45, botR = 4.6 } = {}) {
+  const housingGeo = new THREE.CylinderGeometry(0.65, 0.8, 1.3, 10);
+  const lensGeo = new THREE.CircleGeometry(0.62, 12);
+  const beamGeo = new THREE.ConeGeometry(botR, beamLength, 16, 1, true);
+  // Shift cone so apex (topR/point) is at pivot (0,0,0) and beam extends downward/forward along +Y
+  beamGeo.translate(0, -beamLength * 0.5, 0);
+  const housingMat = new THREE.MeshStandardMaterial({
+    color: 0x1e1b4b,
+    roughness: 0.35,
+    metalness: 0.65,
+  });
+  disposables.push(housingGeo, lensGeo, beamGeo, housingMat);
+
+  const sweepers = [];
+  for (let i = 0; i < spots.length; i++) {
+    const sp = spots[i];
+    const colHex = sp.color ?? 0x00f5d4;
+
+    const mount = new THREE.Group();
+    mount.position.set(sp.x, sp.y, sp.z);
+    mount.rotation.y = sp.yaw || 0;
+    root.add(mount);
+
+    const pivot = new THREE.Group();
+    mount.add(pivot);
+
+    const housing = new THREE.Mesh(housingGeo, housingMat);
+    pivot.add(housing);
+
+    const beamMat = new THREE.MeshBasicMaterial({
+      color: colHex,
+      transparent: true,
+      opacity: 0.19,
+      blending: THREE.AdditiveBlending,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const lensMat = new THREE.MeshBasicMaterial({ color: colHex });
+    disposables.push(beamMat, lensMat);
+
+    const lens = new THREE.Mesh(lensGeo, lensMat);
+    lens.position.y = -0.66;
+    lens.rotation.x = Math.PI * 0.5;
+    pivot.add(lens);
+
+    const beam = new THREE.Mesh(beamGeo, beamMat);
+    beam.position.y = -0.5;
+    // Slight inward tilt by default
+    pivot.add(beam);
+
+    sweepers.push({
+      pivot,
+      beamMat,
+      baseTiltX: sp.baseTiltX ?? 0.55,
+      baseTiltZ: sp.baseTiltZ ?? 0,
+      ampX: sp.ampX ?? 0.35,
+      ampZ: sp.ampZ ?? 0.45,
+      speedX: sp.speedX ?? (1.1 + (i % 3) * 0.28),
+      speedZ: sp.speedZ ?? (0.85 + (i % 2) * 0.35),
+      phase: sp.phase ?? i * 1.35,
+    });
+  }
+  return sweepers;
+}
+
+function buildArenaWorld(scene, trackId = 'arena') {
   const root = new THREE.Group();
   root.name = `TrackWorld_${trackId}`;
   scene.add(root);
@@ -665,9 +1065,214 @@ export function buildTrackWorld(scene, trackId = 'coco') {
   const disposables = [];
   const trackTex = [];
 
+  const skyTex = createSkyTexture('arena');
+  trackTex.push(skyTex);
+  const skyGeo = new THREE.SphereGeometry(720, 32, 24);
+  const skyMat = new THREE.MeshBasicMaterial({
+    map: skyTex,
+    side: THREE.BackSide,
+    depthWrite: false,
+    fog: false,
+  });
+  root.add(new THREE.Mesh(skyGeo, skyMat));
+  disposables.push(skyGeo, skyMat);
+
+  const floorY = ARENA_DATA.floorY ?? 0.6;
+  const radius = ARENA_DATA.radius ?? 48;
+
+  // Circular neon stadium floor
+  const floorGeo = new THREE.CircleGeometry(radius, 64);
+  floorGeo.rotateX(-Math.PI / 2);
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: 0x161b33,
+    roughness: 0.35,
+    metalness: 0.25,
+  });
+  const floorMesh = new THREE.Mesh(floorGeo, floorMat);
+  floorMesh.position.y = floorY;
+  floorMesh.receiveShadow = true;
+  root.add(floorMesh);
+  disposables.push(floorGeo, floorMat);
+
+  // Concentric neon stadium rings
+  const ringColors = [0xff2a54, 0x00bbf9, 0xfacc15];
+  for (let i = 0; i < 3; i++) {
+    const rIn = 12 + i * 13;
+    const rGeo = new THREE.RingGeometry(rIn, rIn + 0.7, 64);
+    rGeo.rotateX(-Math.PI / 2);
+    const rMat = new THREE.MeshBasicMaterial({
+      color: ringColors[i],
+      transparent: true,
+      opacity: 0.75,
+    });
+    const rMesh = new THREE.Mesh(rGeo, rMat);
+    rMesh.position.y = floorY + 0.03;
+    root.add(rMesh);
+    disposables.push(rGeo, rMat);
+  }
+
+  // Outer perimeter glowing rim wall
+  const rimGeo = new THREE.CylinderGeometry(radius + 0.8, radius + 0.8, 3.2, 64, 1, true);
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: 0x1e1b4b,
+    emissive: 0xf72585,
+    emissiveIntensity: 0.45,
+    side: THREE.BackSide,
+    roughness: 0.3,
+  });
+  const rimMesh = new THREE.Mesh(rimGeo, rimMat);
+  rimMesh.position.y = floorY + 1.5;
+  root.add(rimMesh);
+  const topTorusGeo = new THREE.TorusGeometry(radius + 0.6, 0.55, 10, 64);
+  topTorusGeo.rotateX(Math.PI / 2);
+  const topTorusMat = new THREE.MeshStandardMaterial({
+    color: 0x00f5d4,
+    emissive: 0x00f5d4,
+    emissiveIntensity: 0.65,
+  });
+  const topTorus = new THREE.Mesh(topTorusGeo, topTorusMat);
+  topTorus.position.y = floorY + 3.1;
+  root.add(topTorus);
+  disposables.push(rimGeo, rimMat, topTorusGeo, topTorusMat);
+
+  // Dynamic sweeping stadium spotlights around perimeter
+  const arenaSpots = [];
+  const spotPalette = [0x00f5d4, 0xf72585, 0xfacc15, 0x38bdf8, 0xa855f7, 0xff2a54];
+  for (let i = 0; i < 6; i++) {
+    const ang = (i / 6) * Math.PI * 2;
+    const dist = radius + 2.5;
+    arenaSpots.push({
+      x: Math.sin(ang) * dist,
+      y: floorY + 28,
+      z: Math.cos(ang) * dist,
+      yaw: ang,
+      color: spotPalette[i % spotPalette.length],
+      baseTiltX: 0.62,
+      ampX: 0.26,
+      ampZ: 0.42,
+      phase: i * 1.1,
+    });
+  }
+  const arenaSweepers = buildSweepingSpotlights(root, arenaSpots, disposables, {
+    beamLength: 52,
+    botR: 5.2,
+  });
+
+  // 4 Cylindrical Neon Pillars
+  const pillarGeo = new THREE.CylinderGeometry(2.5, 2.5, 9.5, 20);
+  const pillarMat = new THREE.MeshStandardMaterial({
+    color: 0x3b0764,
+    emissive: 0x00bbf9,
+    emissiveIntensity: 0.38,
+    roughness: 0.25,
+  });
+  disposables.push(pillarGeo, pillarMat);
+  for (const p of ARENA_DATA.pillars || []) {
+    const pm = new THREE.Mesh(pillarGeo, pillarMat);
+    pm.position.set(p.x, floorY + 4.75, p.z);
+    pm.castShadow = true;
+    root.add(pm);
+  }
+
+  // Central Glowing Arcade Bumper
+  const bumperRings = [];
+  const bBaseGeo = new THREE.CylinderGeometry(2.6, 2.9, 1.5, 24);
+  const bCapGeo = new THREE.CylinderGeometry(3.05, 2.6, 0.5, 24);
+  const bRingGeo = new THREE.TorusGeometry(2.85, 0.26, 10, 24);
+  bRingGeo.rotateX(Math.PI / 2);
+  const bMat = new THREE.MeshStandardMaterial({
+    color: 0xfacc15,
+    emissive: 0xf97316,
+    emissiveIntensity: 0.65,
+    roughness: 0.2,
+  });
+  const bRingMat = new THREE.MeshBasicMaterial({ color: 0xff2a54 });
+  disposables.push(bBaseGeo, bCapGeo, bRingGeo, bMat, bRingMat);
+  for (const b of ARENA_DATA.bumperSpots || []) {
+    const bg = new THREE.Group();
+    bg.position.set(b.x, floorY, b.z);
+    const body = new THREE.Mesh(bBaseGeo, bMat);
+    body.position.y = 0.75;
+    const cap = new THREE.Mesh(bCapGeo, bRingMat);
+    cap.position.y = 1.65;
+    const ring = new THREE.Mesh(bRingGeo, bRingMat);
+    ring.position.y = 0.95;
+    bg.add(body, cap, ring);
+    root.add(bg);
+    bumperRings.push(ring);
+  }
+
+  // 4 Directional Boost Pads
+  const boostTex = createBoostPadTexture(['#00f5d4', '#ffe600', '#ff2a85'], '#140b2e');
+  trackTex.push(boostTex);
+  const boostMat = new THREE.MeshStandardMaterial({
+    map: boostTex,
+    emissive: 0xffffff,
+    emissiveMap: boostTex,
+    emissiveIntensity: 0.95,
+    polygonOffset: true,
+    polygonOffsetFactor: -3,
+  });
+  const boostGeo = new THREE.PlaneGeometry(3.2, 5.4);
+  boostGeo.rotateX(-Math.PI / 2);
+  boostGeo.rotateY(Math.PI);
+  disposables.push(boostMat, boostGeo);
+  for (const pad of ARENA_DATA.boostPadSpots || []) {
+    const m = new THREE.Mesh(boostGeo, boostMat);
+    m.position.set(pad.x, floorY + 0.05, pad.z);
+    m.rotation.y = pad.yaw || 0;
+    root.add(m);
+  }
+
+  return {
+    trackId,
+    group: root,
+    startSample: { x: 0, y: floorY, z: 14, yaw: 0 },
+    centerX: 0,
+    centerZ: 0,
+    update(dt, elapsed) {
+      boostTex.offset.y = (boostTex.offset.y - dt * 2.4) % 1;
+      for (const r of bumperRings) {
+        r.scale.setScalar(1 + Math.sin(elapsed * 6) * 0.08);
+      }
+      for (const sw of arenaSweepers) {
+        sw.pivot.rotation.x = sw.baseTiltX + Math.sin(elapsed * sw.speedX + sw.phase) * sw.ampX;
+        sw.pivot.rotation.z = sw.baseTiltZ + Math.cos(elapsed * sw.speedZ + sw.phase) * sw.ampZ;
+        sw.beamMat.opacity = 0.14 + (Math.sin(elapsed * 3.2 + sw.phase) + 1) * 0.05;
+      }
+    },
+    dispose() {
+      scene.remove(root);
+      for (const d of disposables) d?.dispose?.();
+      for (const t of trackTex) t?.dispose?.();
+    },
+  };
+}
+
+/**
+ * Builds the entire 3D circuit + themed world.
+ */
+export function buildTrackWorld(scene, trackId = 'coco') {
+  if (isArenaTrack(trackId)) {
+    return buildArenaWorld(scene, trackId);
+  }
+  const baseId = getBaseTrackId(trackId);
+  const root = new THREE.Group();
+  root.name = `TrackWorld_${trackId}`;
+  scene.add(root);
+
+  const disposables = [];
+  const trackTex = [];
+
+  const isMobile =
+    typeof window !== 'undefined' &&
+    (Boolean(window.matchMedia?.('(pointer: coarse)')?.matches) ||
+      /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') ||
+      Math.min(window.innerWidth || 1280, window.innerHeight || 720) < 768);
+
   const meta = typeof getTrackMeta === 'function' ? getTrackMeta(trackId) : null;
   const samples = getTrackSamples(360, trackId);
-  const coarseSamples = getTrackSamples(160, trackId);
+  const coarseSamples = getTrackSamples(isMobile ? 112 : 160, trackId);
   const roadHalfW = meta?.roadHalfWidth || samples[0]?.roadHalfWidth || RACE_CONFIG.ROAD_HALF_WIDTH || 7.5;
 
   // Compute track centroid & bounds
@@ -729,7 +1334,7 @@ export function buildTrackWorld(scene, trackId = 'coco') {
   root.add(skyMesh);
   disposables.push(skyGeo, skyMat);
 
-  if (trackId === 'coco') {
+  if (baseId === 'coco') {
     const sunGroup = new THREE.Group();
     sunGroup.position.set(210, 250, -240);
     const sunCoreGeo = new THREE.SphereGeometry(22, 20, 16);
@@ -745,7 +1350,7 @@ export function buildTrackWorld(scene, trackId = 'coco') {
     sunGroup.add(new THREE.Mesh(sunCoreGeo, sunCoreMat), new THREE.Mesh(sunHaloGeo, sunHaloMat));
     root.add(sunGroup);
     disposables.push(sunCoreGeo, sunCoreMat, sunHaloGeo, sunHaloMat);
-  } else if (trackId === 'neon') {
+  } else if (baseId === 'neon') {
     // Giant Synthwave Retro Striped Sun on the horizon!
     const synthSunTex = createSynthwaveSunTexture();
     trackTex.push(synthSunTex);
@@ -766,6 +1371,8 @@ export function buildTrackWorld(scene, trackId = 'coco') {
   // Track-specific animatable refs
   let waterTex = null;
   let neonGridTex = null;
+  let lavaTex = null;
+  let lavaMat = null;
   let foamPosAttr = null;
   let foamMat = null;
   let foamCenters = null;
@@ -774,12 +1381,44 @@ export function buildTrackWorld(scene, trackId = 'coco') {
   let crownInst = null;
   let palmPlacements = [];
   const cosmicSpinners = [];
+  const neonArchMats = [];
+  const bumperRings = [];
   const dummy = new THREE.Object3D();
+  const tmpWeatherColor = new THREE.Color();
+
+  // Biome weather & 3D life refs (zero per-frame GC allocations)
+  const seagulls = [];
+  let cocoFirefliesInst = null;
+  const cocoFireflies = [];
+  let specBodyInst = null;
+  let specHeadInst = null;
+  const spectators = [];
+
+  let snowInst = null;
+  const snowData = [];
+  const auroraRibbons = [];
+
+  let neonRainInst = null;
+  const neonRainData = [];
+  const holoBillboards = [];
+  let cyberCarHullInst = null;
+  let cyberCarGlowInst = null;
+  const cyberTraffic = [];
+
+  let emberInst = null;
+  const volcanoEmbers = [];
+  const lavaPulseMats = [];
+
+  const shootingStars = [];
+  let cosmicDustInst = null;
+  const cosmicDustData = [];
+
+  let pinballSweepers = [];
 
   // 2. TRACK-THEMED TERRAIN / GROUND / SPACE ENVIRONMENT
-  const rng = mulberry32(trackId === 'neon' ? 208899 : trackId === 'rainbow' ? 994411 : 777123);
+  const rng = mulberry32(baseId === 'neon' ? 208899 : baseId === 'rainbow' ? 994411 : baseId === 'pinball' ? 515151 : 777123);
 
-  if (trackId === 'coco') {
+  if (baseId === 'coco') {
     // --- ÎLE COCO: Turquoise Ocean + Sculpted Island + Shoreline Foam + Palms & Hills ---
     function evaluateIslandHeight(x, z) {
       const { dist, nearest, smoothY } = evaluateTrackProximity(x, z);
@@ -792,9 +1431,21 @@ export function buildTrackWorld(scene, trackId = 'coco') {
 
       const shoulderEnd = roadHalfW + 5.2;
       const baseRoadBedY = smoothY - 0.16;
+      const isDitchZone = nearest && nearest.hasGuardrail === false;
+
+      let y;
+      let inDitch = false;
+      if (isDitchZone && dist > roadHalfW + 0.15 && dist < roadHalfW + 24) {
+        inDitch = true;
+        const innerDrop = smoothstep(roadHalfW + 0.15, roadHalfW + 3.2, dist);
+        const outerRise = 1 - smoothstep(roadHalfW + 13.5, roadHalfW + 24, dist);
+        const carve = innerDrop * outerRise;
+        y = THREE.MathUtils.lerp(baseRoadBedY, -2.15, carve);
+        return { y, dist, inside, nearest, inDitch };
+      }
 
       if (dist <= shoulderEnd) {
-        return { y: baseRoadBedY, dist, inside, nearest };
+        return { y: baseRoadBedY, dist, inside, nearest, inDitch };
       }
 
       if (inside) {
@@ -803,14 +1454,13 @@ export function buildTrackWorld(scene, trackId = 'coco') {
           1.35 +
           Math.sin(x * 0.055 + 1.1) * Math.cos(z * 0.055 - 0.4) * 1.65 +
           Math.max(0, Math.sin(x * 0.028 - z * 0.031)) * 1.8;
-        return { y: baseRoadBedY + tIn * hillBump, dist, inside, nearest };
+        return { y: baseRoadBedY + tIn * hillBump, dist, inside, nearest, inDitch };
       }
 
       const beachStart = shoulderEnd + 16 + coastWave * 0.35;
       const waterEdge = shoulderEnd + 40 + coastWave;
       const deepEdge = waterEdge + 26;
 
-      let y;
       if (dist < beachStart) {
         y = THREE.MathUtils.lerp(baseRoadBedY, 0.85, smoothstep(shoulderEnd, beachStart, dist));
       } else if (dist < waterEdge) {
@@ -818,7 +1468,7 @@ export function buildTrackWorld(scene, trackId = 'coco') {
       } else {
         y = THREE.MathUtils.lerp(0.0, -2.2, smoothstep(waterEdge, deepEdge, dist));
       }
-      return { y, dist, inside, nearest };
+      return { y, dist, inside, nearest, inDitch };
     }
 
     waterTex = createWaterRippleTexture();
@@ -850,7 +1500,7 @@ export function buildTrackWorld(scene, trackId = 'coco') {
     const x1 = maxX + pad;
     const z0 = minZ - pad;
     const z1 = maxZ + pad;
-    const segs = 90;
+    const segs = isMobile ? 56 : 90;
     const vertsPerRow = segs + 1;
 
     const terrainPos = new Float32Array(vertsPerRow * vertsPerRow * 3);
@@ -870,14 +1520,16 @@ export function buildTrackWorld(scene, trackId = 'coco') {
       for (let ix = 0; ix <= segs; ix++) {
         const vx = x0 + (x1 - x0) * (ix / segs);
         const idx = iz * vertsPerRow + ix;
-        const { y, inside } = evaluateIslandHeight(vx, vz);
+        const { y, inside, inDitch } = evaluateIslandHeight(vx, vz);
 
         terrainPos[idx * 3] = vx;
         terrainPos[idx * 3 + 1] = y;
         terrainPos[idx * 3 + 2] = vz;
 
         const stripe = (Math.sin(vx * 0.16) * Math.cos(vz * 0.16) + 1) * 0.5;
-        if (inside || y > 1.05) {
+        if (inDitch) {
+          tmpColor.copy(cSandWet).lerp(cSandWarm, smoothstep(-1.8, 0.4, y) * 0.75);
+        } else if (inside || y > 1.05) {
           tmpColor.copy(cGrassDeep).lerp(cGrassBright, 0.35 + stripe * 0.5);
           if (y > 2.4) tmpColor.lerp(cGrassHill, smoothstep(2.4, 4.8, y) * 0.55);
         } else if (y > 0.18) {
@@ -1085,11 +1737,13 @@ export function buildTrackWorld(scene, trackId = 'coco') {
     cocoInst.instanceMatrix.needsUpdate = true;
     root.add(trunkInst, crownInst, cocoInst);
 
-    // Puffy White Clouds
+    // Puffy White Clouds with funny Mario-style eyes
     cloudsGroup = new THREE.Group();
     cloudsGroup.position.set(centerX, 0, centerZ);
     root.add(cloudsGroup);
     const cloudPuffGeo = new THREE.IcosahedronGeometry(1, 1);
+    const cloudEyeGeo = new THREE.SphereGeometry(0.18, 8, 8);
+    cloudEyeGeo.scale(0.85, 1.55, 0.6);
     const cloudMat = new THREE.MeshStandardMaterial({
       color: 0xffffff,
       emissive: 0xdbeafe,
@@ -1098,7 +1752,8 @@ export function buildTrackWorld(scene, trackId = 'coco') {
       flatShading: true,
       fog: false,
     });
-    disposables.push(cloudPuffGeo, cloudMat);
+    const cloudEyeMat = new THREE.MeshBasicMaterial({ color: 0x111827, fog: false });
+    disposables.push(cloudPuffGeo, cloudEyeGeo, cloudMat, cloudEyeMat);
     for (let c = 0; c < 18; c++) {
       const cl = new THREE.Group();
       const ang = (c / 18) * Math.PI * 2 + rng() * 0.22;
@@ -1117,9 +1772,287 @@ export function buildTrackWorld(scene, trackId = 'coco') {
         m.scale.set(pf[3] * sc, pf[4] * sc, pf[5] * sc);
         cl.add(m);
       }
+      for (const ex of [-0.32, 0.32]) {
+        const eye = new THREE.Mesh(cloudEyeGeo, cloudEyeMat);
+        eye.position.set(ex * sc, 0.12 * sc, 0.95 * sc);
+        eye.scale.setScalar(sc * 0.9);
+        cl.add(eye);
+      }
       cloudsGroup.add(cl);
     }
-  } else if (trackId === 'neon') {
+
+    // Iconic Mario-Kart Green Warp Pipes & Giant Polka-Dot Mushrooms along scenic roadside
+    const pipeCylGeo = new THREE.CylinderGeometry(1.15, 1.15, 3.6, 16);
+    const pipeRimGeo = new THREE.CylinderGeometry(1.42, 1.42, 0.85, 16);
+    const pipeVoidGeo = new THREE.CylinderGeometry(0.95, 0.95, 0.2, 14);
+    const pipeMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.28, metalness: 0.08 });
+    const pipeVoidMat = new THREE.MeshBasicMaterial({ color: 0x052e16 });
+    const mushStemGeo = new THREE.CylinderGeometry(0.7, 0.95, 2.2, 12);
+    const mushCapGeo = new THREE.SphereGeometry(2.1, 16, 12, 0, Math.PI * 2, 0, Math.PI * 0.56);
+    const mushSpotGeo = new THREE.SphereGeometry(0.45, 10, 8);
+    const mushStemMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.75 });
+    const mushCapMat = new THREE.MeshStandardMaterial({ color: 0xef4444, roughness: 0.35 });
+    const mushSpotMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 });
+    disposables.push(
+      pipeCylGeo,
+      pipeRimGeo,
+      pipeVoidGeo,
+      pipeMat,
+      pipeVoidMat,
+      mushStemGeo,
+      mushCapGeo,
+      mushSpotGeo,
+      mushStemMat,
+      mushCapMat,
+      mushSpotMat
+    );
+
+    const cocoPropSlots = [
+      { t: 0.08, side: 1, kind: 'pipe', scale: 1.15 },
+      { t: 0.17, side: -1, kind: 'mush', scale: 1.25 },
+      { t: 0.28, side: 1, kind: 'mush', scale: 1.05 },
+      { t: 0.51, side: -1, kind: 'pipe', scale: 1.3 },
+      { t: 0.62, side: 1, kind: 'pipe', scale: 1.1 },
+      { t: 0.71, side: -1, kind: 'mush', scale: 1.35 },
+      { t: 0.94, side: 1, kind: 'mush', scale: 1.15 },
+    ];
+    for (const slot of cocoPropSlots) {
+      const s = getTrackSample(slot.t, trackId);
+      const px = s.x + s.nx * slot.side * (roadHalfW + 6.4);
+      const pz = s.z + s.nz * slot.side * (roadHalfW + 6.4);
+      const { dist, y, nearest } = evaluateIslandHeight(px, pz);
+      if (dist < roadHalfW + 4.8 || nearest?.hasGuardrail === false || y < -0.3) continue;
+
+      const propGroup = new THREE.Group();
+      propGroup.position.set(px, y, pz);
+      propGroup.scale.setScalar(slot.scale);
+
+      if (slot.kind === 'pipe') {
+        const body = new THREE.Mesh(pipeCylGeo, pipeMat);
+        body.position.y = 1.8;
+        body.castShadow = true;
+        const rim = new THREE.Mesh(pipeRimGeo, pipeMat);
+        rim.position.y = 3.55;
+        rim.castShadow = true;
+        const hollow = new THREE.Mesh(pipeVoidGeo, pipeVoidMat);
+        hollow.position.y = 3.92;
+        propGroup.add(body, rim, hollow);
+      } else {
+        const stem = new THREE.Mesh(mushStemGeo, mushStemMat);
+        stem.position.y = 1.1;
+        stem.castShadow = true;
+        const cap = new THREE.Mesh(mushCapGeo, mushCapMat);
+        cap.position.y = 2.0;
+        cap.castShadow = true;
+        propGroup.add(stem, cap);
+        for (const [sx, sy, sz] of [
+          [1.25, 2.85, 0.85],
+          [-1.35, 2.75, 0.7],
+          [0.15, 3.85, 0.25],
+          [0.2, 2.7, -1.45],
+        ]) {
+          const spot = new THREE.Mesh(mushSpotGeo, mushSpotMat);
+          spot.position.set(sx, sy, sz);
+          propGroup.add(spot);
+        }
+      }
+      root.add(propGroup);
+    }
+
+    // Seagulls circling gracefully over the tropical lagoon
+    const gullBodyGeo = new THREE.ConeGeometry(0.24, 1.05, 6);
+    gullBodyGeo.rotateX(Math.PI * 0.5);
+    const gullBeakGeo = new THREE.ConeGeometry(0.08, 0.34, 5);
+    gullBeakGeo.rotateX(Math.PI * 0.5);
+    const gullWingGeo = new THREE.BoxGeometry(0.95, 0.05, 0.36);
+    gullWingGeo.translate(0.48, 0, 0);
+    const gullWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.45 });
+    const gullBeakMat = new THREE.MeshStandardMaterial({ color: 0xf97316, roughness: 0.4 });
+    disposables.push(gullBodyGeo, gullBeakGeo, gullWingGeo, gullWhiteMat, gullBeakMat);
+
+    for (let g = 0; g < 8; g++) {
+      const gullGroup = new THREE.Group();
+      const body = new THREE.Mesh(gullBodyGeo, gullWhiteMat);
+      const beak = new THREE.Mesh(gullBeakGeo, gullBeakMat);
+      beak.position.set(0, -0.02, 0.65);
+      const wingL = new THREE.Group();
+      const wingLMesh = new THREE.Mesh(gullWingGeo, gullWhiteMat);
+      wingL.add(wingLMesh);
+      const wingR = new THREE.Group();
+      const wingRMesh = new THREE.Mesh(gullWingGeo, gullWhiteMat);
+      wingRMesh.scale.x = -1;
+      wingR.add(wingRMesh);
+      gullGroup.add(body, beak, wingL, wingR);
+      gullGroup.scale.setScalar(1.15 + (g % 3) * 0.15);
+      root.add(gullGroup);
+      seagulls.push({
+        group: gullGroup,
+        wingL,
+        wingR,
+        rx: 72 + (g % 4) * 22,
+        rz: 68 + ((g + 2) % 4) * 20,
+        baseY: 18 + (g % 3) * 5.5,
+        speed: (g % 2 === 0 ? 1 : -1) * (0.18 + (g % 3) * 0.04),
+        phase: (g / 8) * Math.PI * 2,
+        flapSpeed: 6.5 + (g % 3) * 1.4,
+      });
+    }
+
+    // Tropical Sun-Motes / Fireflies drifting over the island
+    const FIREFLY_COUNT = 100;
+    const fireflyGeo = new THREE.OctahedronGeometry(0.14, 0);
+    const fireflyMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.85,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    disposables.push(fireflyGeo, fireflyMat);
+    cocoFirefliesInst = new THREE.InstancedMesh(fireflyGeo, fireflyMat, FIREFLY_COUNT);
+    cocoFirefliesInst.frustumCulled = false;
+    disposables.push(cocoFirefliesInst);
+    for (let i = 0; i < FIREFLY_COUNT; i++) {
+      const fx = x0 + 25 + rng() * (x1 - x0 - 50);
+      const fz = z0 + 25 + rng() * (z1 - z0 - 50);
+      const info = evaluateIslandHeight(fx, fz);
+      const fy = Math.max(0.8, info.y + 1.0 + rng() * 5.5);
+      cocoFireflies.push({
+        x: fx,
+        y: fy,
+        z: fz,
+        phase: rng() * Math.PI * 2,
+        speed: 0.9 + rng() * 1.4,
+        amp: 0.6 + rng() * 1.1,
+      });
+      dummy.position.set(fx, fy, fz);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      cocoFirefliesInst.setMatrixAt(i, dummy.matrix);
+      tmpWeatherColor.setHex(i % 3 === 0 ? 0xa7f3d0 : i % 3 === 1 ? 0xfef08a : 0xffedd5);
+      cocoFirefliesInst.setColorAt(i, tmpWeatherColor);
+    }
+    cocoFirefliesInst.instanceMatrix.needsUpdate = true;
+    if (cocoFirefliesInst.instanceColor) cocoFirefliesInst.instanceColor.needsUpdate = true;
+    root.add(cocoFirefliesInst);
+
+    // Colorful Grandstands with Animated Cheering Spectators
+    const standSlots = [
+      { t: 0.028, side: -1 },
+      { t: 0.67, side: 1 },
+      { t: 0.96, side: -1 },
+    ];
+    const standBaseGeo = new THREE.BoxGeometry(14, 1.0, 5.4);
+    const standStepGeo = new THREE.BoxGeometry(13.6, 0.85, 3.4);
+    const standRoofGeo = new THREE.BoxGeometry(14.6, 0.35, 5.8);
+    const standPostGeo = new THREE.CylinderGeometry(0.16, 0.16, 4.8, 8);
+    const standWoodMat = new THREE.MeshStandardMaterial({ color: 0xb45309, roughness: 0.78 });
+    const standTrimMat = new THREE.MeshStandardMaterial({ color: 0xff2a54, roughness: 0.45 });
+    const standCanopyMat = new THREE.MeshStandardMaterial({ color: 0xfef3c7, roughness: 0.55 });
+    disposables.push(
+      standBaseGeo,
+      standStepGeo,
+      standRoofGeo,
+      standPostGeo,
+      standWoodMat,
+      standTrimMat,
+      standCanopyMat
+    );
+
+    const specPalette = [0xff2a3c, 0xffbe0b, 0x00bbf9, 0xff70a6, 0x38b000, 0x7209b7, 0xffffff];
+    const specPositions = [];
+    for (const slot of standSlots) {
+      const s = getTrackSample(slot.t, trackId);
+      const gx = s.x + s.nx * slot.side * (roadHalfW + 9.2);
+      const gz = s.z + s.nz * slot.side * (roadHalfW + 9.2);
+      const info = evaluateIslandHeight(gx, gz);
+      if (info.dist < roadHalfW + 7.5 || info.nearest?.hasGuardrail === false || info.y < 0.05) continue;
+
+      const stand = new THREE.Group();
+      stand.position.set(gx, info.y - 0.1, gz);
+      // Face toward the road
+      const faceYaw = Math.atan2(-s.nx * slot.side, -s.nz * slot.side);
+      stand.rotation.y = faceYaw;
+
+      const step1 = new THREE.Mesh(standBaseGeo, standWoodMat);
+      step1.position.set(0, 0.5, 0);
+      step1.castShadow = true;
+      step1.receiveShadow = true;
+      const step2 = new THREE.Mesh(standStepGeo, standTrimMat);
+      step2.position.set(0, 1.35, -0.95);
+      step2.castShadow = true;
+      const roof = new THREE.Mesh(standRoofGeo, standCanopyMat);
+      roof.position.set(0, 5.1, -0.1);
+      roof.rotation.x = 0.14;
+      roof.castShadow = true;
+      stand.add(step1, step2, roof);
+
+      for (const px of [-6.6, 6.6]) {
+        for (const pz of [-2.2, 2.2]) {
+          const post = new THREE.Mesh(standPostGeo, standWoodMat);
+          post.position.set(px, 2.6, pz);
+          stand.add(post);
+        }
+      }
+      root.add(stand);
+
+      const cosY = Math.cos(faceYaw);
+      const sinY = Math.sin(faceYaw);
+      for (let row = 0; row < 2; row++) {
+        const localZ = row === 0 ? 1.1 : -0.95;
+        const localY = row === 0 ? 1.05 : 1.82;
+        for (let col = 0; col < 10; col++) {
+          const localX = -5.6 + col * 1.24;
+          const wx = gx + localX * cosY + localZ * sinY;
+          const wz = gz - localX * sinY + localZ * cosY;
+          specPositions.push({
+            x: wx,
+            baseY: info.y - 0.1 + localY,
+            z: wz,
+            yaw: faceYaw,
+            color: specPalette[(col + row * 3 + specPositions.length) % specPalette.length],
+            phase: rng() * Math.PI * 2,
+            speed: 5.2 + rng() * 3.8,
+          });
+        }
+      }
+    }
+
+    if (specPositions.length > 0) {
+      const specBodyGeo = new THREE.CylinderGeometry(0.2, 0.25, 0.52, 7);
+      const specHeadGeo = new THREE.SphereGeometry(0.21, 8, 6);
+      const specBodyMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.55 });
+      const specHeadMat = new THREE.MeshStandardMaterial({ color: 0xffd6b0, roughness: 0.6 });
+      disposables.push(specBodyGeo, specHeadGeo, specBodyMat, specHeadMat);
+
+      specBodyInst = new THREE.InstancedMesh(specBodyGeo, specBodyMat, specPositions.length);
+      specHeadInst = new THREE.InstancedMesh(specHeadGeo, specHeadMat, specPositions.length);
+      specBodyInst.frustumCulled = false;
+      specHeadInst.frustumCulled = false;
+      disposables.push(specBodyInst, specHeadInst);
+
+      for (let i = 0; i < specPositions.length; i++) {
+        const sp = specPositions[i];
+        spectators.push(sp);
+        dummy.position.set(sp.x, sp.baseY + 0.26, sp.z);
+        dummy.rotation.set(0, sp.yaw, 0);
+        dummy.scale.setScalar(1);
+        dummy.updateMatrix();
+        specBodyInst.setMatrixAt(i, dummy.matrix);
+        tmpWeatherColor.setHex(sp.color);
+        specBodyInst.setColorAt(i, tmpWeatherColor);
+
+        dummy.position.set(sp.x, sp.baseY + 0.66, sp.z);
+        dummy.updateMatrix();
+        specHeadInst.setMatrixAt(i, dummy.matrix);
+      }
+      specBodyInst.instanceMatrix.needsUpdate = true;
+      if (specBodyInst.instanceColor) specBodyInst.instanceColor.needsUpdate = true;
+      specHeadInst.instanceMatrix.needsUpdate = true;
+      root.add(specBodyInst, specHeadInst);
+    }
+  } else if (baseId === 'neon') {
     // --- NÉON DRIFT: Cyber Tokyo Neon Grid Floor + Glowing Skyscraper Skyline + Overpass Pillars ---
     neonGridTex = createNeonGridTexture();
     trackTex.push(neonGridTex);
@@ -1234,7 +2167,473 @@ export function buildTrackWorld(scene, trackId = 'coco') {
       trimPinkInst.instanceMatrix.needsUpdate = true;
       root.add(towerInst, trimCyanInst, trimPinkInst);
     }
-  } else if (trackId === 'rainbow') {
+
+    // 3 Glowing Cyber Holo-Arches spanning Néon Drift
+    const archSpan = roadHalfW + 1.85;
+    const archLegGeo = new THREE.BoxGeometry(0.85, 8.6, 0.85);
+    const archBeamGeo = new THREE.BoxGeometry(archSpan * 2 + 1.2, 0.85, 1.0);
+    const archTorusGeo = new THREE.TorusGeometry(archSpan * 0.72, 0.24, 8, 28, Math.PI);
+    const archBodyMat = new THREE.MeshStandardMaterial({ color: 0x1e1b4b, roughness: 0.3, metalness: 0.6 });
+    disposables.push(archLegGeo, archBeamGeo, archTorusGeo, archBodyMat);
+
+    for (const [idx, tArch] of [0.10, 0.49, 0.85].entries()) {
+      const s = getTrackSample(tArch, trackId);
+      const archG = new THREE.Group();
+      archG.position.set(s.x, s.y, s.z);
+      archG.rotation.y = s.yaw;
+
+      const legL = new THREE.Mesh(archLegGeo, archBodyMat);
+      legL.position.set(-archSpan, 4.3, 0);
+      const legR = new THREE.Mesh(archLegGeo, archBodyMat);
+      legR.position.set(archSpan, 4.3, 0);
+      const beam = new THREE.Mesh(archBeamGeo, archBodyMat);
+      beam.position.set(0, 8.6, 0);
+
+      const neonHex = idx % 2 === 0 ? 0x00f5d4 : 0xf72585;
+      const archNeonMat = new THREE.MeshStandardMaterial({
+        color: neonHex,
+        emissive: neonHex,
+        emissiveIntensity: 1.1,
+        roughness: 0.15,
+      });
+      disposables.push(archNeonMat);
+      neonArchMats.push(archNeonMat);
+
+      const neonArc = new THREE.Mesh(archTorusGeo, archNeonMat);
+      neonArc.position.set(0, 5.2, 0);
+      archG.add(legL, legR, beam, neonArc);
+      root.add(archG);
+    }
+
+    // Neon Rain (InstancedMesh streaks falling diagonally)
+    const NEON_RAIN_COUNT = 220;
+    const rainGeo = new THREE.BoxGeometry(0.045, 1.85, 0.045);
+    const rainMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.56,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    disposables.push(rainGeo, rainMat);
+    neonRainInst = new THREE.InstancedMesh(rainGeo, rainMat, NEON_RAIN_COUNT);
+    neonRainInst.frustumCulled = false;
+    disposables.push(neonRainInst);
+    for (let i = 0; i < NEON_RAIN_COUNT; i++) {
+      const rx = minX - 35 + rng() * (maxX - minX + 70);
+      const rz = minZ - 35 + rng() * (maxZ - minZ + 70);
+      const ry = rng() * 44;
+      neonRainData.push({
+        x: rx,
+        y: ry,
+        z: rz,
+        speed: 34 + rng() * 18,
+      });
+      dummy.position.set(rx, ry, rz);
+      dummy.rotation.set(0, 0, 0.09);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      neonRainInst.setMatrixAt(i, dummy.matrix);
+      tmpWeatherColor.setHex(i % 2 === 0 ? 0x00f5d4 : 0xf72585);
+      neonRainInst.setColorAt(i, tmpWeatherColor);
+    }
+    neonRainInst.instanceMatrix.needsUpdate = true;
+    if (neonRainInst.instanceColor) neonRainInst.instanceColor.needsUpdate = true;
+    root.add(neonRainInst);
+
+    // Floating Translucent Hologram Billboards along Neon Boulevard
+    const holoGeo = new THREE.PlaneGeometry(6.8, 3.4);
+    const holoSpecs = [
+      { t: 0.04, side: 1, v: 0 },
+      { t: 0.17, side: -1, v: 1 },
+      { t: 0.34, side: 1, v: 2 },
+      { t: 0.53, side: -1, v: 0 },
+      { t: 0.72, side: 1, v: 1 },
+      { t: 0.90, side: -1, v: 2 },
+    ];
+    disposables.push(holoGeo);
+    const holoTextures = [0, 1, 2].map((v) => {
+      const ht = createHoloSignTexture(v);
+      trackTex.push(ht);
+      return ht;
+    });
+    for (let i = 0; i < holoSpecs.length; i++) {
+      const hs = holoSpecs[i];
+      const s = getTrackSample(hs.t, trackId);
+      const hMat = new THREE.MeshBasicMaterial({
+        map: holoTextures[hs.v],
+        transparent: true,
+        opacity: 0.84,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+      });
+      disposables.push(hMat);
+      const hm = new THREE.Mesh(holoGeo, hMat);
+      const baseY = s.y + 4.4;
+      hm.position.set(
+        s.x + s.nx * hs.side * (roadHalfW + 5.8),
+        baseY,
+        s.z + s.nz * hs.side * (roadHalfW + 5.8)
+      );
+      hm.rotation.y = s.yaw + Math.PI - hs.side * 0.38;
+      root.add(hm);
+      holoBillboards.push({ mesh: hm, mat: hMat, baseY, phase: i * 1.3 });
+    }
+
+    // Cyber Sky Traffic (hover vehicles cruising high sky corridors)
+    const CYBER_CARS = 12;
+    const carHullGeo = new THREE.BoxGeometry(1.35, 0.52, 3.2);
+    const carGlowGeo = new THREE.BoxGeometry(1.1, 0.22, 3.45);
+    const carHullMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.3, metalness: 0.7 });
+    const carGlowMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    disposables.push(carHullGeo, carGlowGeo, carHullMat, carGlowMat);
+    cyberCarHullInst = new THREE.InstancedMesh(carHullGeo, carHullMat, CYBER_CARS);
+    cyberCarGlowInst = new THREE.InstancedMesh(carGlowGeo, carGlowMat, CYBER_CARS);
+    cyberCarHullInst.frustumCulled = false;
+    cyberCarGlowInst.frustumCulled = false;
+    disposables.push(cyberCarHullInst, cyberCarGlowInst);
+    for (let i = 0; i < CYBER_CARS; i++) {
+      const lane = i % 2;
+      cyberTraffic.push({
+        rx: lane === 0 ? 115 : 148,
+        rz: lane === 0 ? 105 : 132,
+        y: 26 + (i % 4) * 6.5,
+        angle: (i / CYBER_CARS) * Math.PI * 2,
+        speed: (lane === 0 ? 1 : -1) * (0.24 + (i % 3) * 0.05),
+      });
+      dummy.position.set(centerX, 30, centerZ);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      cyberCarHullInst.setMatrixAt(i, dummy.matrix);
+      cyberCarGlowInst.setMatrixAt(i, dummy.matrix);
+      tmpWeatherColor.setHex(i % 2 === 0 ? 0x00f5d4 : 0xf72585);
+      cyberCarGlowInst.setColorAt(i, tmpWeatherColor);
+    }
+    cyberCarHullInst.instanceMatrix.needsUpdate = true;
+    cyberCarGlowInst.instanceMatrix.needsUpdate = true;
+    if (cyberCarGlowInst.instanceColor) cyberCarGlowInst.instanceColor.needsUpdate = true;
+    root.add(cyberCarHullInst, cyberCarGlowInst);
+  } else if (baseId === 'polar') {
+    // --- PIC POLAIRE: Glacier Ocean, Snowy Horizon Peaks, Snow Pines & Glowing Cyan Ice Zones ---
+    const iceOceanGeo = new THREE.PlaneGeometry(1400, 1400);
+    iceOceanGeo.rotateX(-Math.PI / 2);
+    const iceOceanMat = new THREE.MeshStandardMaterial({
+      color: 0x0c4a6e,
+      roughness: 0.25,
+      metalness: 0.15,
+    });
+    const iceOcean = new THREE.Mesh(iceOceanGeo, iceOceanMat);
+    iceOcean.position.set(centerX, -2.8, centerZ);
+    iceOcean.receiveShadow = true;
+    root.add(iceOcean);
+
+    const snowPeakGeo = new THREE.ConeGeometry(16, 36, 7);
+    const snowPeakMat = new THREE.MeshStandardMaterial({ color: 0xe0f2fe, roughness: 0.65, flatShading: true });
+    disposables.push(iceOceanGeo, iceOceanMat, snowPeakGeo, snowPeakMat);
+    for (let i = 0; i < 36; i++) {
+      const ang = (i / 36) * Math.PI * 2 + rng() * 0.2;
+      const dist = 170 + rng() * 140;
+      const peak = new THREE.Mesh(snowPeakGeo, snowPeakMat);
+      peak.position.set(centerX + Math.cos(ang) * dist, 10 + rng() * 8, centerZ + Math.sin(ang) * dist);
+      peak.scale.set(0.7 + rng() * 1.1, 0.7 + rng() * 1.4, 0.7 + rng() * 1.1);
+      root.add(peak);
+    }
+
+    // Translucent cyan ice patches rendered right over track `iceZones`
+    const icePatchMat = new THREE.MeshStandardMaterial({
+      color: 0x67e8f9,
+      emissive: 0x06b6d4,
+      emissiveIntensity: 0.35,
+      transparent: true,
+      opacity: 0.56,
+      roughness: 0.08,
+      metalness: 0.25,
+      polygonOffset: true,
+      polygonOffsetFactor: -2,
+    });
+    disposables.push(icePatchMat);
+    for (const iz of meta?.iceZones || []) {
+      const steps = 18;
+      const iPos = [];
+      const iIdx = [];
+      for (let k = 0; k <= steps; k++) {
+        const t = iz.startT + ((iz.endT - iz.startT) * k) / steps;
+        const s = getTrackSample(t, trackId);
+        const hw = (s.roadHalfWidth || roadHalfW) - 0.3;
+        iPos.push(s.x - s.nx * hw, s.y + 0.045, s.z - s.nz * hw);
+        iPos.push(s.x + s.nx * hw, s.y + 0.045, s.z + s.nz * hw);
+        if (k < steps) {
+          const b = k * 2;
+          pushOrientedQuad(iIdx, iPos, b, b + 1, b + 2, b + 3, 0, 1, 0);
+        }
+      }
+      const ig = new THREE.BufferGeometry();
+      ig.setAttribute('position', new THREE.Float32BufferAttribute(iPos, 3));
+      ig.setIndex(iIdx);
+      ig.computeVertexNormals();
+      root.add(new THREE.Mesh(ig, icePatchMat));
+      disposables.push(ig);
+    }
+
+    // 3D Falling Crystal Snowflakes
+    const SNOW_COUNT = 220;
+    const snowGeo = new THREE.OctahedronGeometry(0.19, 0);
+    const snowMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.86,
+      depthWrite: false,
+    });
+    disposables.push(snowGeo, snowMat);
+    snowInst = new THREE.InstancedMesh(snowGeo, snowMat, SNOW_COUNT);
+    snowInst.frustumCulled = false;
+    disposables.push(snowInst);
+    for (let i = 0; i < SNOW_COUNT; i++) {
+      const sx = minX - 40 + rng() * (maxX - minX + 80);
+      const sz = minZ - 40 + rng() * (maxZ - minZ + 80);
+      const sy = rng() * 34;
+      snowData.push({
+        x: sx,
+        y: sy,
+        z: sz,
+        fallSpeed: 3.6 + rng() * 3.2,
+        swayFreq: 1.1 + rng() * 1.3,
+        swayAmp: 1.4 + rng() * 2.2,
+        phase: rng() * Math.PI * 2,
+        scale: 0.7 + rng() * 0.75,
+        spin: (rng() - 0.5) * 4.5,
+      });
+      dummy.position.set(sx, sy, sz);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      snowInst.setMatrixAt(i, dummy.matrix);
+    }
+    snowInst.instanceMatrix.needsUpdate = true;
+    root.add(snowInst);
+
+    // Undulating Aurora Borealis Curtains in the Polar Sky
+    const auroraTex = createAuroraTexture();
+    trackTex.push(auroraTex);
+    const auroraPalettes = [
+      [new THREE.Color(0x00f5d4), new THREE.Color(0x38bdf8), new THREE.Color(0xa855f7)],
+      [new THREE.Color(0x34d399), new THREE.Color(0x22d3ee), new THREE.Color(0x818cf8)],
+    ];
+    for (let a = 0; a < 2; a++) {
+      const segW = 36;
+      const segH = 4;
+      const aGeo = new THREE.PlaneGeometry(340, 68, segW, segH);
+      const posAttr = aGeo.attributes.position;
+      const cols = new Float32Array(posAttr.count * 3);
+      const pal = auroraPalettes[a];
+      const basePos = new Float32Array(posAttr.array.length);
+
+      for (let v = 0; v < posAttr.count; v++) {
+        const lx = posAttr.getX(v);
+        const ly = posAttr.getY(v);
+        const u = (lx + 170) / 340;
+        const arcAngle = (u - 0.5) * 1.45;
+        const radius = 265 + a * 35;
+        const wx = Math.sin(arcAngle) * radius;
+        const wz = -Math.cos(arcAngle) * radius;
+        const wy = ly + 86 + a * 12;
+        posAttr.setXYZ(v, wx, wy, wz);
+
+        if (u < 0.5) tmpWeatherColor.copy(pal[0]).lerp(pal[1], u * 2);
+        else tmpWeatherColor.copy(pal[1]).lerp(pal[2], (u - 0.5) * 2);
+        cols[v * 3] = tmpWeatherColor.r;
+        cols[v * 3 + 1] = tmpWeatherColor.g;
+        cols[v * 3 + 2] = tmpWeatherColor.b;
+      }
+      basePos.set(posAttr.array);
+      aGeo.setAttribute('color', new THREE.BufferAttribute(cols, 3));
+
+      const aMat = new THREE.MeshBasicMaterial({
+        map: auroraTex,
+        vertexColors: true,
+        transparent: true,
+        opacity: 0.52,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        fog: false,
+      });
+      disposables.push(aGeo, aMat);
+      const aMesh = new THREE.Mesh(aGeo, aMat);
+      aMesh.position.set(centerX, 0, centerZ);
+      aMesh.rotation.y = a * 2.1 - 0.4;
+      root.add(aMesh);
+      auroraRibbons.push({
+        posAttr,
+        basePos,
+        mat: aMat,
+        phase: a * 2.3,
+      });
+    }
+  } else if (baseId === 'pinball') {
+    // --- FLIPPER ARCADE: Illuminated Cabinet Floor, Neon Star Pylons & 3D Bouncing Bumpers ---
+    const cabFloorGeo = new THREE.PlaneGeometry(1400, 1400);
+    cabFloorGeo.rotateX(-Math.PI / 2);
+    const cabFloorMat = new THREE.MeshStandardMaterial({ color: 0x12062a, roughness: 0.4 });
+    const cabFloor = new THREE.Mesh(cabFloorGeo, cabFloorMat);
+    cabFloor.position.set(centerX, -3.2, centerZ);
+    root.add(cabFloor);
+
+    const starColGeo = new THREE.OctahedronGeometry(4.5, 0);
+    const starColMat = new THREE.MeshStandardMaterial({
+      color: 0xfacc15,
+      emissive: 0xc084fc,
+      emissiveIntensity: 0.65,
+      roughness: 0.2,
+    });
+    disposables.push(cabFloorGeo, cabFloorMat, starColGeo, starColMat);
+    for (let i = 0; i < 24; i++) {
+      const ang = (i / 24) * Math.PI * 2;
+      const d = 155 + (i % 3) * 38;
+      const st = new THREE.Mesh(starColGeo, starColMat);
+      st.position.set(centerX + Math.cos(ang) * d, 14 + (i % 2) * 10, centerZ + Math.sin(ang) * d);
+      root.add(st);
+      cosmicSpinners.push({ obj: st, speedY: 0.8 + (i % 3) * 0.3 });
+    }
+
+    // 3D Glowing Pinball Bumpers at meta.bumperSpots
+    const bCoreGeo = new THREE.CylinderGeometry(1.5, 1.85, 1.35, 20);
+    const bCapGeo = new THREE.CylinderGeometry(2.15, 1.65, 0.45, 20);
+    const bRingGeo = new THREE.TorusGeometry(2.0, 0.22, 10, 22);
+    bRingGeo.rotateX(Math.PI / 2);
+    const bBodyMat = new THREE.MeshStandardMaterial({ color: 0xfacc15, emissive: 0xf97316, emissiveIntensity: 0.55 });
+    const bCapMat = new THREE.MeshStandardMaterial({ color: 0xf43f5e, emissive: 0xf43f5e, emissiveIntensity: 0.85 });
+    const bRingMat = new THREE.MeshBasicMaterial({ color: 0x00f5d4 });
+    disposables.push(bCoreGeo, bCapGeo, bRingGeo, bBodyMat, bCapMat, bRingMat);
+    for (const bp of meta?.bumperSpots || []) {
+      const grp = new THREE.Group();
+      grp.position.set(bp.x, bp.y, bp.z);
+      const scale = (bp.radius || 2.15) / 2.15;
+      grp.scale.setScalar(scale);
+      const core = new THREE.Mesh(bCoreGeo, bBodyMat);
+      core.position.y = 0.68;
+      const cap = new THREE.Mesh(bCapGeo, bCapMat);
+      cap.position.y = 1.52;
+      const ring = new THREE.Mesh(bRingGeo, bRingMat);
+      ring.position.y = 0.9;
+      grp.add(core, cap, ring);
+      root.add(grp);
+      bumperRings.push(ring);
+    }
+
+    // Dynamic Sweeping Arcade Spotlights
+    const pinballSpots = [];
+    const pSpotColors = [0xfacc15, 0xf43f5e, 0x00f5d4, 0xc084fc, 0x38bdf8, 0xff2a54];
+    for (let i = 0; i < 6; i++) {
+      const ang = (i / 6) * Math.PI * 2 + 0.2;
+      const dist = 128;
+      pinballSpots.push({
+        x: centerX + Math.sin(ang) * dist,
+        y: 42,
+        z: centerZ + Math.cos(ang) * dist,
+        yaw: ang,
+        color: pSpotColors[i % pSpotColors.length],
+        baseTiltX: 0.72,
+        ampX: 0.28,
+        ampZ: 0.45,
+        phase: i * 1.15,
+      });
+    }
+    pinballSweepers = buildSweepingSpotlights(root, pinballSpots, disposables, {
+      beamLength: 68,
+      botR: 6.4,
+    });
+  } else if (baseId === 'volcano') {
+    // --- VOLCAN MAGMA: Pulsing Molten Sea, Dark Volcanic Cones & Enriched Rising Embers ---
+    lavaTex = createLavaTexture();
+    trackTex.push(lavaTex);
+    const lavaGeo = new THREE.PlaneGeometry(1400, 1400);
+    lavaGeo.rotateX(-Math.PI / 2);
+    lavaMat = new THREE.MeshStandardMaterial({
+      color: 0xb91c1c,
+      map: lavaTex,
+      emissive: 0xff5400,
+      emissiveMap: lavaTex,
+      emissiveIntensity: 1.15,
+      roughness: 0.45,
+    });
+    const lava = new THREE.Mesh(lavaGeo, lavaMat);
+    lava.position.set(centerX, -4.5, centerZ);
+    root.add(lava);
+
+    const coneGeo = new THREE.ConeGeometry(24, 48, 8);
+    const coneMat = new THREE.MeshStandardMaterial({ color: 0x291a18, roughness: 0.9, flatShading: true });
+    const emberGeo = new THREE.OctahedronGeometry(0.28, 0);
+    const emberMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.92,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    const lavaRingGeo = new THREE.RingGeometry(46, 54, 40);
+    lavaRingGeo.rotateX(-Math.PI / 2);
+    disposables.push(lavaGeo, lavaMat, coneGeo, coneMat, emberGeo, emberMat, lavaRingGeo);
+
+    for (let i = 0; i < 20; i++) {
+      const ang = (i / 20) * Math.PI * 2 + rng() * 0.2;
+      const dist = 165 + rng() * 130;
+      const cone = new THREE.Mesh(coneGeo, coneMat);
+      cone.position.set(centerX + Math.cos(ang) * dist, 14, centerZ + Math.sin(ang) * dist);
+      cone.scale.set(0.8 + rng(), 0.7 + rng() * 1.1, 0.8 + rng());
+      root.add(cone);
+    }
+
+    // Pulsing molten caldera glow rings
+    for (let r = 0; r < 3; r++) {
+      const ringMat = new THREE.MeshBasicMaterial({
+        color: r % 2 === 0 ? 0xf97316 : 0xfacc15,
+        transparent: true,
+        opacity: 0.34,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+      });
+      disposables.push(ringMat);
+      lavaPulseMats.push(ringMat);
+      const rm = new THREE.Mesh(lavaRingGeo, ringMat);
+      rm.position.set(centerX + (r - 1) * 55, -4.2, centerZ + (r === 1 ? 45 : -35));
+      rm.scale.setScalar(1 + r * 0.55);
+      root.add(rm);
+    }
+
+    const EMBER_COUNT = 180;
+    emberInst = new THREE.InstancedMesh(emberGeo, emberMat, EMBER_COUNT);
+    emberInst.frustumCulled = false;
+    disposables.push(emberInst);
+    const emberPalette = [0xfde047, 0xfb923c, 0xf97316, 0xef4444];
+    for (let i = 0; i < EMBER_COUNT; i++) {
+      const ex = centerX + (rng() - 0.5) * 260;
+      const ez = centerZ + (rng() - 0.5) * 260;
+      const baseY = -1 + rng() * 14;
+      volcanoEmbers.push({
+        x: ex,
+        z: ez,
+        baseY,
+        speed: 6.5 + rng() * 9.5,
+        phase: rng() * 28,
+        driftFreq: 1.5 + rng() * 2.0,
+        driftAmp: 1.2 + rng() * 2.2,
+        scale: 0.65 + rng() * 0.95,
+      });
+      dummy.position.set(ex, baseY, ez);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      emberInst.setMatrixAt(i, dummy.matrix);
+      tmpWeatherColor.setHex(emberPalette[i % emberPalette.length]);
+      emberInst.setColorAt(i, tmpWeatherColor);
+    }
+    emberInst.instanceMatrix.needsUpdate = true;
+    if (emberInst.instanceColor) emberInst.instanceColor.needsUpdate = true;
+    root.add(emberInst);
+  } else if (baseId === 'rainbow') {
     // --- ROUTE CÉLESTE: Floating Cosmic Planets, Crystal Star Rings & Space Sparkles ---
     // Ringed Saturn Planet
     const planetGroup = new THREE.Group();
@@ -1297,6 +2696,134 @@ export function buildTrackWorld(scene, trackId = 'coco') {
       cosmicSpinners.push({ obj: crystal, speedY: 0.6 + (i % 4) * 0.25 });
     }
     disposables.push(starCrystalGeo);
+
+    // 3 Giant Spinning Golden Star Rings overarching Route Céleste
+    const starArchRadius = roadHalfW + 2.4;
+    const starRingGeo = new THREE.TorusGeometry(starArchRadius, 0.36, 10, 36);
+    const miniStarGeo = new THREE.OctahedronGeometry(0.95, 0);
+    const starRingMat = new THREE.MeshStandardMaterial({
+      color: 0xffd60a,
+      emissive: 0xffbe0b,
+      emissiveIntensity: 0.85,
+      roughness: 0.2,
+      metalness: 0.4,
+    });
+    const gemStarMat = new THREE.MeshStandardMaterial({
+      color: 0x00f5d4,
+      emissive: 0x00bbf9,
+      emissiveIntensity: 0.9,
+      roughness: 0.15,
+    });
+    disposables.push(starRingGeo, miniStarGeo, starRingMat, gemStarMat);
+
+    for (const [idx, tRing] of [0.12, 0.43, 0.89].entries()) {
+      const s = getTrackSample(tRing, trackId);
+      const ringContainer = new THREE.Group();
+      ringContainer.position.set(s.x, s.y + 1.2, s.z);
+      ringContainer.rotation.y = s.yaw;
+
+      const spinRing = new THREE.Group();
+      const mainRing = new THREE.Mesh(starRingGeo, starRingMat);
+      spinRing.add(mainRing);
+
+      for (let k = 0; k < 4; k++) {
+        const a = (k / 4) * Math.PI * 2;
+        const gem = new THREE.Mesh(miniStarGeo, k % 2 === 0 ? gemStarMat : starRingMat);
+        gem.position.set(Math.cos(a) * starArchRadius, Math.sin(a) * starArchRadius, 0);
+        spinRing.add(gem);
+      }
+      ringContainer.add(spinRing);
+      root.add(ringContainer);
+      cosmicSpinners.push({ obj: spinRing, speedZ: idx % 2 === 0 ? 0.55 : -0.55 });
+    }
+
+    // Sparkling Cosmic Stardust floating around the sky ribbon
+    const DUST_COUNT = 200;
+    const dustGeo = new THREE.OctahedronGeometry(0.18, 0);
+    const dustMat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.9,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+    });
+    disposables.push(dustGeo, dustMat);
+    cosmicDustInst = new THREE.InstancedMesh(dustGeo, dustMat, DUST_COUNT);
+    cosmicDustInst.frustumCulled = false;
+    disposables.push(cosmicDustInst);
+    const dustPalette = [0x00f5d4, 0xffbe0b, 0xff70a6, 0x38bdf8, 0xe879f9];
+    for (let i = 0; i < DUST_COUNT; i++) {
+      const s = samples[Math.floor(rng() * samples.length)];
+      const lat = (rng() - 0.5) * 46;
+      const dx = s.x + s.nx * lat;
+      const dz = s.z + s.nz * lat;
+      const dy = s.y + (rng() - 0.35) * 18;
+      cosmicDustData.push({
+        x: dx,
+        y: dy,
+        z: dz,
+        phase: rng() * Math.PI * 2,
+        twinkleSpeed: 2.2 + rng() * 3.8,
+        driftSpeed: 0.5 + rng() * 0.9,
+        baseScale: 0.6 + rng() * 1.1,
+      });
+      dummy.position.set(dx, dy, dz);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      cosmicDustInst.setMatrixAt(i, dummy.matrix);
+      tmpWeatherColor.setHex(dustPalette[i % dustPalette.length]);
+      cosmicDustInst.setColorAt(i, tmpWeatherColor);
+    }
+    cosmicDustInst.instanceMatrix.needsUpdate = true;
+    if (cosmicDustInst.instanceColor) cosmicDustInst.instanceColor.needsUpdate = true;
+    root.add(cosmicDustInst);
+
+    // Shooting Stars streaking across the cosmic sky dome
+    const starHeadGeo = new THREE.OctahedronGeometry(0.95, 0);
+    const starTailGeo = new THREE.ConeGeometry(0.55, 22, 6);
+    starTailGeo.rotateX(-Math.PI * 0.5);
+    starTailGeo.translate(0, 0, -11);
+    const starHeadMat = new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false });
+    const starTailMat = new THREE.MeshBasicMaterial({
+      color: 0x38bdf8,
+      transparent: true,
+      opacity: 0.72,
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      fog: false,
+    });
+    disposables.push(starHeadGeo, starTailGeo, starHeadMat, starTailMat);
+
+    for (let i = 0; i < 7; i++) {
+      const sg = new THREE.Group();
+      const head = new THREE.Mesh(starHeadGeo, starHeadMat);
+      const tail = new THREE.Mesh(starTailGeo, starTailMat);
+      sg.add(head, tail);
+      root.add(sg);
+
+      const az = (i / 7) * Math.PI * 2 + 0.4;
+      const rad = 220 + (i % 3) * 45;
+      const sx = centerX + Math.cos(az) * rad;
+      const sz = centerZ + Math.sin(az) * rad;
+      const sy = 55 + (i % 4) * 24;
+      const vx = -Math.sin(az) * 140 + 35;
+      const vy = -22 - (i % 3) * 10;
+      const vz = Math.cos(az) * 140 - 25;
+      sg.position.set(sx, sy, sz);
+      sg.lookAt(sx + vx, sy + vy, sz + vz);
+      shootingStars.push({
+        group: sg,
+        startX: sx,
+        startY: sy,
+        startZ: sz,
+        vx,
+        vy,
+        vz,
+        cycle: 3.4 + (i % 3) * 1.1,
+        offset: i * 1.15,
+      });
+    }
   }
 
   // 3. ROAD RIBBON + CONDITIONAL 3D CURBSTONES (respecting `hasGuardrail` on Rainbow Sky!)
@@ -1333,7 +2860,7 @@ export function buildTrackWorld(scene, trackId = 'coco') {
     roadUV[iR * 2] = 1;
     roadUV[iR * 2 + 1] = arcDist * 0.085;
 
-    if (trackId === 'rainbow') {
+    if (baseId === 'rainbow') {
       const hueL = ((i / N) * 5.0) % 1;
       const hueR = (hueL + 0.14) % 1;
       tmpRainbow.setHSL(hueL, 0.95, 0.62);
@@ -1365,56 +2892,105 @@ export function buildTrackWorld(scene, trackId = 'coco') {
   const roadMat = new THREE.MeshStandardMaterial({
     map: roadTex,
     vertexColors: true,
-    roughness: trackId === 'neon' ? 0.24 : trackId === 'rainbow' ? 0.2 : 0.72,
-    metalness: trackId === 'neon' ? 0.35 : trackId === 'rainbow' ? 0.18 : 0.06,
-    transparent: trackId === 'rainbow',
-    opacity: trackId === 'rainbow' ? 0.9 : 1.0,
-    side: trackId === 'rainbow' ? THREE.DoubleSide : THREE.FrontSide,
-    emissive: trackId === 'neon' || trackId === 'rainbow' ? 0xffffff : 0x000000,
-    emissiveMap: trackId === 'neon' ? roadTex : null,
-    emissiveIntensity: trackId === 'neon' ? 0.45 : trackId === 'rainbow' ? 0.22 : 0,
+    roughness: baseId === 'neon' ? 0.24 : baseId === 'rainbow' ? 0.2 : 0.72,
+    metalness: baseId === 'neon' ? 0.35 : baseId === 'rainbow' ? 0.18 : 0.06,
+    transparent: baseId === 'rainbow',
+    opacity: baseId === 'rainbow' ? 0.9 : 1.0,
+    side: baseId === 'rainbow' ? THREE.DoubleSide : THREE.FrontSide,
+    emissive: baseId === 'neon' || baseId === 'rainbow' ? 0xffffff : 0x000000,
+    emissiveMap: baseId === 'neon' ? roadTex : null,
+    emissiveIntensity: baseId === 'neon' ? 0.45 : baseId === 'rainbow' ? 0.22 : 0,
   });
   const roadMesh = new THREE.Mesh(roadGeo, roadMat);
   roadMesh.receiveShadow = true;
   root.add(roadMesh);
   disposables.push(roadGeo, roadMat);
 
-  // 3b. Raised 3D Curbstones (omitted in gapZones where hasGuardrail === false!)
+  // 3b. Raised 3D Curbstones, Safety Guardrails & Unwalled Ditch Retaining Walls
   const curbPos = [];
   const curbCol = [];
   const curbIndices = [];
+  const railPos = [];
+  const railCol = [];
+  const railIndices = [];
+  const ditchPos = [];
+  const ditchCol = [];
+  const ditchIndices = [];
+  const railPostPositions = [];
 
   const cCurbA = new THREE.Color(
-    trackId === 'neon' ? '#00f5d4' : trackId === 'rainbow' ? '#ffe600' : '#ff2438'
+    baseId === 'neon' ? '#00f5d4' : baseId === 'rainbow' ? '#ffe600' : baseId === 'polar' ? '#38bdf8' : baseId === 'pinball' ? '#facc15' : baseId === 'volcano' ? '#f97316' : '#ff2438'
   );
   const cCurbB = new THREE.Color(
-    trackId === 'neon' ? '#f72585' : trackId === 'rainbow' ? '#00f5d4' : '#ffffff'
+    baseId === 'neon' ? '#f72585' : baseId === 'rainbow' ? '#00f5d4' : baseId === 'polar' ? '#ffffff' : baseId === 'pinball' ? '#c084fc' : baseId === 'volcano' ? '#291a18' : '#ffffff'
   );
   const cSkirt = new THREE.Color(
-    trackId === 'neon' ? '#1e1b4b' : trackId === 'rainbow' ? '#7209b7' : '#27ae60'
+    baseId === 'neon' ? '#1e1b4b' : baseId === 'rainbow' ? '#7209b7' : baseId === 'polar' ? '#0284c7' : baseId === 'pinball' ? '#4c1d95' : baseId === 'volcano' ? '#450a0a' : '#27ae60'
+  );
+  const cRailA = new THREE.Color(
+    baseId === 'neon' ? '#00f5d4' : baseId === 'rainbow' ? '#ffd60a' : baseId === 'polar' ? '#7dd3fc' : baseId === 'pinball' ? '#facc15' : baseId === 'volcano' ? '#fb923c' : '#ef4444'
+  );
+  const cRailB = new THREE.Color(
+    baseId === 'neon' ? '#f72585' : baseId === 'rainbow' ? '#a855f7' : baseId === 'polar' ? '#e0f2fe' : baseId === 'pinball' ? '#f43f5e' : baseId === 'volcano' ? '#fde047' : '#ffffff'
+  );
+  const cDitchRim = new THREE.Color(baseId === 'rainbow' ? '#f59e0b' : '#ff2e63');
+  const cDitchWall = new THREE.Color(
+    baseId === 'neon' ? '#160d35' : baseId === 'rainbow' ? '#2e1065' : '#334155'
   );
 
+  const shortcutZones = meta?.shortcutZones || [];
   const blockStep = 2;
   for (const side of [-1, 1]) {
     for (let i = 0; i < N; i++) {
-      const s0 = samples[i];
-      const s1 = samples[(i + 1) % N];
-
-      // On Rainbow Sky, leave gapZones completely open to the starry sky!
-      if (s0.hasGuardrail === false || s1.hasGuardrail === false) {
+      const tMid = (i + 0.5) / N;
+      if (
+        shortcutZones.some(
+          (sz) =>
+            Math.sign(sz.lateral) === side &&
+            tMid >= sz.startT - 0.015 &&
+            tMid <= sz.endT + 0.015
+        )
+      ) {
         continue;
       }
 
+      const s0 = samples[i];
+      const s1 = samples[(i + 1) % N];
       const hw0 = s0.roadHalfWidth || roadHalfW;
       const hw1 = s1.roadHalfWidth || roadHalfW;
+      const outX = s0.nx * side;
+      const outZ = s0.nz * side;
+
+      // In ditch/void gapZones: omit curbs & guardrails and draw a steep 3D trench drop wall!
+      if (s0.hasGuardrail === false || s1.hasGuardrail === false) {
+        const wallDrop = baseId === 'rainbow' ? -1.45 : -2.65;
+        const rimDrop = -0.22;
+        const baseD = ditchPos.length / 3;
+        const dPts = [
+          [s0.x + s0.nx * side * (hw0 + 0.08), s0.y + 0.03, s0.z + s0.nz * side * (hw0 + 0.08), cDitchRim],
+          [s0.x + s0.nx * side * (hw0 + 0.16), s0.y + rimDrop, s0.z + s0.nz * side * (hw0 + 0.16), cDitchWall],
+          [s0.x + s0.nx * side * (hw0 + 0.35), s0.y + wallDrop, s0.z + s0.nz * side * (hw0 + 0.35), cDitchWall],
+          [s1.x + s1.nx * side * (hw1 + 0.08), s1.y + 0.03, s1.z + s1.nz * side * (hw1 + 0.08), cDitchRim],
+          [s1.x + s1.nx * side * (hw1 + 0.16), s1.y + rimDrop, s1.z + s1.nz * side * (hw1 + 0.16), cDitchWall],
+          [s1.x + s1.nx * side * (hw1 + 0.35), s1.y + wallDrop, s1.z + s1.nz * side * (hw1 + 0.35), cDitchWall],
+        ];
+        for (const p of dPts) {
+          ditchPos.push(p[0], p[1], p[2]);
+          ditchCol.push(p[3].r, p[3].g, p[3].b);
+        }
+        pushOrientedQuad(ditchIndices, ditchPos, baseD + 0, baseD + 1, baseD + 3, baseD + 4, outX, 0.25, outZ);
+        pushOrientedQuad(ditchIndices, ditchPos, baseD + 1, baseD + 2, baseD + 4, baseD + 5, outX, 0.1, outZ);
+        continue;
+      }
+
       const topCol = Math.floor(i / blockStep) % 2 === 0 ? cCurbA : cCurbB;
 
       const innerOff = -0.05;
       const innerTopOff = 0.12;
       const outerTopOff = 0.92;
-      const outerBotOff = trackId === 'rainbow' ? 0.98 : 1.42;
-      const curbH = trackId === 'rainbow' ? 0.24 : 0.15;
-      const skirtDrop = trackId === 'rainbow' ? -0.18 : -0.45;
+      const outerBotOff = baseId === 'rainbow' ? 0.98 : 1.42;
+      const curbH = baseId === 'rainbow' ? 0.24 : 0.15;
+      const skirtDrop = baseId === 'rainbow' ? -0.18 : -0.45;
 
       const baseIdx = curbPos.length / 3;
       const pts = [
@@ -1433,11 +3009,42 @@ export function buildTrackWorld(scene, trackId = 'coco') {
         curbCol.push(p[3].r, p[3].g, p[3].b);
       }
 
-      const outX = s0.nx * side;
-      const outZ = s0.nz * side;
       pushOrientedQuad(curbIndices, curbPos, baseIdx + 0, baseIdx + 1, baseIdx + 4, baseIdx + 5, -outX * 0.5, 1, -outZ * 0.5);
       pushOrientedQuad(curbIndices, curbPos, baseIdx + 1, baseIdx + 2, baseIdx + 5, baseIdx + 6, 0, 1, 0);
       pushOrientedQuad(curbIndices, curbPos, baseIdx + 2, baseIdx + 3, baseIdx + 6, baseIdx + 7, outX, 0.6, outZ);
+
+      // Raised 3D Mario-Kart safety guardrail beam + periodic posts
+      const rCol = Math.floor(i / blockStep) % 2 === 0 ? cRailA : cRailB;
+      const rIn = 0.78;
+      const rOut = 0.98;
+      const rBot = 0.28;
+      const rTop = 0.78;
+      const baseR = railPos.length / 3;
+      const rPts = [
+        [s0.x + s0.nx * side * (hw0 + rIn), s0.y + rBot, s0.z + s0.nz * side * (hw0 + rIn), rCol],
+        [s0.x + s0.nx * side * (hw0 + rIn), s0.y + rTop, s0.z + s0.nz * side * (hw0 + rIn), rCol],
+        [s0.x + s0.nx * side * (hw0 + rOut), s0.y + rTop, s0.z + s0.nz * side * (hw0 + rOut), rCol],
+        [s0.x + s0.nx * side * (hw0 + rOut), s0.y + rBot, s0.z + s0.nz * side * (hw0 + rOut), rCol],
+        [s1.x + s1.nx * side * (hw1 + rIn), s1.y + rBot, s1.z + s1.nz * side * (hw1 + rIn), rCol],
+        [s1.x + s1.nx * side * (hw1 + rIn), s1.y + rTop, s1.z + s1.nz * side * (hw1 + rIn), rCol],
+        [s1.x + s1.nx * side * (hw1 + rOut), s1.y + rTop, s1.z + s1.nz * side * (hw1 + rOut), rCol],
+        [s1.x + s1.nx * side * (hw1 + rOut), s1.y + rBot, s1.z + s1.nz * side * (hw1 + rOut), rCol],
+      ];
+      for (const p of rPts) {
+        railPos.push(p[0], p[1], p[2]);
+        railCol.push(p[3].r, p[3].g, p[3].b);
+      }
+      pushOrientedQuad(railIndices, railPos, baseR + 0, baseR + 1, baseR + 4, baseR + 5, -outX, 0, -outZ);
+      pushOrientedQuad(railIndices, railPos, baseR + 1, baseR + 2, baseR + 5, baseR + 6, 0, 1, 0);
+      pushOrientedQuad(railIndices, railPos, baseR + 2, baseR + 3, baseR + 6, baseR + 7, outX, 0, outZ);
+
+      if (i % 4 === 0) {
+        railPostPositions.push([
+          s0.x + s0.nx * side * (hw0 + 0.88),
+          s0.y + 0.36,
+          s0.z + s0.nz * side * (hw0 + 0.88),
+        ]);
+      }
     }
   }
 
@@ -1450,16 +3057,113 @@ export function buildTrackWorld(scene, trackId = 'coco') {
 
     const curbMat = new THREE.MeshStandardMaterial({
       vertexColors: true,
-      roughness: trackId === 'coco' ? 0.48 : 0.25,
+      roughness: baseId === 'coco' ? 0.48 : 0.25,
       metalness: 0.08,
-      emissive: trackId === 'coco' ? 0x000000 : 0xffffff,
-      emissiveIntensity: trackId === 'coco' ? 0 : 0.26,
+      emissive: baseId === 'coco' ? 0x000000 : 0xffffff,
+      emissiveIntensity: baseId === 'coco' ? 0 : 0.26,
     });
     const curbMesh = new THREE.Mesh(curbGeo, curbMat);
     curbMesh.castShadow = true;
     curbMesh.receiveShadow = true;
     root.add(curbMesh);
     disposables.push(curbGeo, curbMat);
+  }
+
+  if (railIndices.length > 0) {
+    const railGeo = new THREE.BufferGeometry();
+    railGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(railPos), 3));
+    railGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(railCol), 3));
+    railGeo.setIndex(railIndices);
+    railGeo.computeVertexNormals();
+
+    const railMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: baseId === 'coco' ? 0.32 : 0.2,
+      metalness: 0.22,
+      emissive: baseId === 'coco' ? 0x000000 : 0xffffff,
+      emissiveIntensity: baseId === 'coco' ? 0 : 0.35,
+    });
+    const railMesh = new THREE.Mesh(railGeo, railMat);
+    railMesh.castShadow = true;
+    root.add(railMesh);
+    disposables.push(railGeo, railMat);
+  }
+
+  if (railPostPositions.length > 0) {
+    const postGeo = new THREE.CylinderGeometry(0.09, 0.11, 0.72, 6);
+    const postMat = new THREE.MeshStandardMaterial({
+      color: baseId === 'neon' ? 0x334155 : baseId === 'rainbow' ? 0xfbbf24 : 0x64748b,
+      roughness: 0.4,
+      metalness: 0.45,
+    });
+    const postInst = new THREE.InstancedMesh(postGeo, postMat, railPostPositions.length);
+    for (let p = 0; p < railPostPositions.length; p++) {
+      const pos = railPostPositions[p];
+      dummy.position.set(pos[0], pos[1], pos[2]);
+      dummy.rotation.set(0, 0, 0);
+      dummy.scale.setScalar(1);
+      dummy.updateMatrix();
+      postInst.setMatrixAt(p, dummy.matrix);
+    }
+    postInst.instanceMatrix.needsUpdate = true;
+    root.add(postInst);
+    disposables.push(postGeo, postMat);
+  }
+
+  if (ditchIndices.length > 0) {
+    const ditchGeo = new THREE.BufferGeometry();
+    ditchGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(ditchPos), 3));
+    ditchGeo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(ditchCol), 3));
+    ditchGeo.setIndex(ditchIndices);
+    ditchGeo.computeVertexNormals();
+
+    const ditchMat = new THREE.MeshStandardMaterial({
+      vertexColors: true,
+      roughness: 0.65,
+      metalness: 0.1,
+    });
+    const ditchMesh = new THREE.Mesh(ditchGeo, ditchMat);
+    ditchMesh.receiveShadow = true;
+    root.add(ditchMesh);
+    disposables.push(ditchGeo, ditchMat);
+  }
+
+  // 3c. Visible Off-Road Shortcut Strips (`meta.shortcutZones`)
+  if (shortcutZones.length > 0) {
+    const shortcutMat = new THREE.MeshStandardMaterial({
+      color: baseId === 'neon' ? 0xf72585 : baseId === 'polar' ? 0x38bdf8 : baseId === 'volcano' ? 0xf97316 : 0xe9b872,
+      emissive: baseId === 'neon' ? 0x7209b7 : 0x78350f,
+      emissiveIntensity: baseId === 'neon' ? 0.4 : 0.14,
+      roughness: 0.65,
+      side: THREE.DoubleSide,
+    });
+    disposables.push(shortcutMat);
+    for (const sz of shortcutZones) {
+      const steps = 16;
+      const scPos = [];
+      const scIdx = [];
+      const hw = sz.halfWidth || 3.2;
+      for (let k = 0; k <= steps; k++) {
+        const t = sz.startT + ((sz.endT - sz.startT) * k) / steps;
+        const s = getTrackSample(t, trackId);
+        const cx = s.x + s.nx * sz.lateral;
+        const cz = s.z + s.nz * sz.lateral;
+        scPos.push(cx - s.nx * hw, s.y + 0.03, cz - s.nz * hw);
+        scPos.push(cx + s.nx * hw, s.y + 0.03, cz + s.nz * hw);
+        if (k < steps) {
+          const b = k * 2;
+          pushOrientedQuad(scIdx, scPos, b, b + 1, b + 2, b + 3, 0, 1, 0);
+        }
+      }
+      const scGeo = new THREE.BufferGeometry();
+      scGeo.setAttribute('position', new THREE.Float32BufferAttribute(scPos, 3));
+      scGeo.setIndex(scIdx);
+      scGeo.computeVertexNormals();
+      const scMesh = new THREE.Mesh(scGeo, shortcutMat);
+      scMesh.receiveShadow = true;
+      root.add(scMesh);
+      disposables.push(scGeo);
+    }
   }
 
   // 4. START / FINISH FESTIVE GANTRY ARCH AT t = 0
@@ -1493,14 +3197,14 @@ export function buildTrackWorld(scene, trackId = 'coco') {
   ringGeo.rotateX(Math.PI / 2);
 
   const primaryPillarMat = new THREE.MeshStandardMaterial({
-    color: trackId === 'neon' ? 0xf72585 : trackId === 'rainbow' ? 0x8338ec : 0xff3b4e,
-    emissive: trackId === 'coco' ? 0x000000 : 0x3a0ca3,
+    color: baseId === 'neon' ? 0xf72585 : baseId === 'rainbow' ? 0x8338ec : 0xff3b4e,
+    emissive: baseId === 'coco' ? 0x000000 : 0x3a0ca3,
     emissiveIntensity: 0.35,
     roughness: 0.3,
   });
   const accentPillarMat = new THREE.MeshStandardMaterial({
-    color: trackId === 'neon' ? 0x00f5d4 : 0xffbe0b,
-    emissive: trackId === 'neon' ? 0x00bbf9 : 0x000000,
+    color: baseId === 'neon' ? 0x00f5d4 : 0xffbe0b,
+    emissive: baseId === 'neon' ? 0x00bbf9 : 0x000000,
     emissiveIntensity: 0.3,
     roughness: 0.3,
   });
@@ -1542,7 +3246,7 @@ export function buildTrackWorld(scene, trackId = 'coco') {
     roughness: 0.32,
     emissive: 0xffffff,
     emissiveMap: bannerTex,
-    emissiveIntensity: trackId === 'coco' ? 0.22 : 0.55,
+    emissiveIntensity: baseId === 'coco' ? 0.22 : 0.55,
   });
   const bannerMesh = new THREE.Mesh(bannerGeo, [
     accentPillarMat,
@@ -1556,6 +3260,65 @@ export function buildTrackWorld(scene, trackId = 'coco') {
   bannerMesh.castShadow = true;
   gantryGroup.add(bannerMesh);
   disposables.push(bannerGeo, bannerFaceMat);
+
+  // Mario-Kart suspended start-light pods below gantry banner
+  const lightBarGeo = new THREE.BoxGeometry(4.4, 0.52, 0.52);
+  const lightPodGeo = new THREE.CylinderGeometry(0.22, 0.22, 0.56, 10);
+  lightPodGeo.rotateX(Math.PI / 2);
+  const lightBarMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.4, metalness: 0.5 });
+  const lampColors = [0xff2e63, 0xff2e63, 0xffbe0b, 0x00e676, 0x00e676];
+  disposables.push(lightBarGeo, lightPodGeo, lightBarMat);
+  const lightBar = new THREE.Mesh(lightBarGeo, lightBarMat);
+  lightBar.position.set(0, pillarH - 2.65, 0);
+  gantryGroup.add(lightBar);
+  const gantryLampMats = [];
+  for (let l = 0; l < 5; l++) {
+    const lx = (l - 2) * 0.88;
+    const lampMat = new THREE.MeshStandardMaterial({
+      color: lampColors[l],
+      emissive: lampColors[l],
+      emissiveIntensity: 0.85,
+      roughness: 0.2,
+    });
+    disposables.push(lampMat);
+    gantryLampMats.push(lampMat);
+    const pod = new THREE.Mesh(lightPodGeo, lampMat);
+    pod.position.set(lx, pillarH - 2.65, 0);
+    gantryGroup.add(pod);
+  }
+
+  // Animated Chasing LED Trim around Start/Finish Gantry (top crossbar + pillars)
+  const gantryLeds = [];
+  const topLedCount = 18;
+  for (let i = 0; i < topLedCount; i++) {
+    const u = i / (topLedCount - 1);
+    const lx = THREE.MathUtils.lerp(-pillarSpan * 0.92, pillarSpan * 0.92, u);
+    gantryLeds.push({ x: lx, y: pillarH + 0.34, z: 0.24, order: i });
+    gantryLeds.push({ x: lx, y: pillarH + 0.34, z: -0.24, order: i });
+  }
+  for (const sx of [-1, 1]) {
+    for (let j = 0; j < 6; j++) {
+      gantryLeds.push({ x: sx * (pillarSpan + sx * 0.42), y: 1.2 + j * 1.0, z: 0, order: j });
+    }
+  }
+  const ledGeo = new THREE.BoxGeometry(0.28, 0.22, 0.22);
+  const ledMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  disposables.push(ledGeo, ledMat);
+  const gantryLedInst = new THREE.InstancedMesh(ledGeo, ledMat, gantryLeds.length);
+  disposables.push(gantryLedInst);
+  for (let i = 0; i < gantryLeds.length; i++) {
+    const gl = gantryLeds[i];
+    dummy.position.set(gl.x, gl.y, gl.z);
+    dummy.rotation.set(0, 0, 0);
+    dummy.scale.setScalar(1);
+    dummy.updateMatrix();
+    gantryLedInst.setMatrixAt(i, dummy.matrix);
+    tmpWeatherColor.setHex(0xffbe0b);
+    gantryLedInst.setColorAt(i, tmpWeatherColor);
+  }
+  gantryLedInst.instanceMatrix.needsUpdate = true;
+  if (gantryLedInst.instanceColor) gantryLedInst.instanceColor.needsUpdate = true;
+  gantryGroup.add(gantryLedInst);
 
   // Festive Balloons tethered to gantry pillars
   const balloons = [];
@@ -1571,7 +3334,7 @@ export function buildTrackWorld(scene, trackId = 'coco') {
     const bMat = new THREE.MeshStandardMaterial({
       color: b.color,
       emissive: b.color,
-      emissiveIntensity: trackId === 'coco' ? 0.08 : 0.35,
+      emissiveIntensity: baseId === 'coco' ? 0.08 : 0.35,
       roughness: 0.18,
     });
     disposables.push(bMat);
@@ -1819,7 +3582,13 @@ export function buildTrackWorld(scene, trackId = 'coco') {
     }
   }
 
+  let decorFrameToggle = false;
+
   function update(dt, elapsed) {
+    decorFrameToggle = !decorFrameToggle;
+    const runSecondaryDecor = !isMobile || decorFrameToggle;
+    const decorDt = isMobile ? dt * 2 : dt;
+
     // Boost pad & Jump ramp scrolling neon chevrons
     boostTex.offset.y = (boostTex.offset.y - dt * 2.6) % 1;
     boostMat.emissiveIntensity = 0.88 + Math.sin(elapsed * 7.5) * 0.28;
@@ -1843,13 +3612,50 @@ export function buildTrackWorld(scene, trackId = 'coco') {
       }
     }
 
-    // Bobbing gantry balloons
+    if (!runSecondaryDecor) return;
+
+    // Bobbing gantry balloons + Animated Start Gantry LED chase
     for (const b of balloons) {
       b.mesh.position.y = b.baseY + Math.sin(elapsed * 2.4 + b.phase) * 0.22;
       b.mesh.position.x = b.baseX + Math.cos(elapsed * 1.7 + b.phase) * 0.12;
     }
 
-    if (trackId === 'coco') {
+    if (gantryLedInst && gantryLeds.length > 0) {
+      const chasePhase = elapsed * 8.0;
+      for (let i = 0; i < gantryLeds.length; i++) {
+        const gl = gantryLeds[i];
+        const wave = (Math.sin(chasePhase - gl.order * 0.65) + 1) * 0.5;
+        if (baseId === 'neon') {
+          tmpWeatherColor.setRGB(
+            THREE.MathUtils.lerp(0.0, 0.97, wave),
+            THREE.MathUtils.lerp(0.96, 0.15, wave),
+            THREE.MathUtils.lerp(0.83, 0.52, wave)
+          );
+        } else if (baseId === 'polar') {
+          tmpWeatherColor.setRGB(
+            THREE.MathUtils.lerp(0.22, 0.95, wave),
+            THREE.MathUtils.lerp(0.74, 0.98, wave),
+            1.0
+          );
+        } else if (baseId === 'rainbow') {
+          tmpWeatherColor.setHSL((elapsed * 0.6 + gl.order * 0.06) % 1, 1.0, 0.58);
+        } else {
+          tmpWeatherColor.setRGB(
+            1.0,
+            THREE.MathUtils.lerp(0.2, 0.92, wave),
+            THREE.MathUtils.lerp(0.28, 0.2, wave)
+          );
+        }
+        gantryLedInst.setColorAt(i, tmpWeatherColor);
+      }
+      if (gantryLedInst.instanceColor) gantryLedInst.instanceColor.needsUpdate = true;
+    }
+    for (let l = 0; l < gantryLampMats.length; l++) {
+      gantryLampMats[l].emissiveIntensity = 0.65 + (Math.sin(elapsed * 5.0 - l * 0.9) + 1) * 0.3;
+    }
+    bannerFaceMat.emissiveIntensity = (baseId === 'coco' ? 0.22 : 0.55) + Math.sin(elapsed * 3.5) * 0.08;
+
+    if (baseId === 'coco') {
       if (waterTex) {
         waterTex.offset.x = (elapsed * 0.032) % 1;
         waterTex.offset.y = (elapsed * 0.024) % 1;
@@ -1887,14 +3693,211 @@ export function buildTrackWorld(scene, trackId = 'coco') {
         }
         crownInst.instanceMatrix.needsUpdate = true;
       }
-    } else if (trackId === 'neon') {
+      // Seagulls circling & flapping wings
+      for (let i = 0; i < seagulls.length; i++) {
+        const g = seagulls[i];
+        const ang = elapsed * g.speed + g.phase;
+        const gx = centerX + Math.cos(ang) * g.rx;
+        const gz = centerZ + Math.sin(ang) * g.rz;
+        const gy = g.baseY + Math.sin(elapsed * 1.4 + g.phase) * 1.6;
+        const vx = -Math.sin(ang) * g.rx * g.speed;
+        const vz = Math.cos(ang) * g.rz * g.speed;
+        g.group.position.set(gx, gy, gz);
+        g.group.rotation.y = Math.atan2(vx, vz);
+        const flap = Math.sin(elapsed * g.flapSpeed + g.phase) * 0.58;
+        g.wingL.rotation.z = flap;
+        g.wingR.rotation.z = -flap;
+      }
+      // Tropical sun-motes / fireflies
+      if (cocoFirefliesInst && cocoFireflies.length > 0) {
+        for (let i = 0; i < cocoFireflies.length; i++) {
+          const f = cocoFireflies[i];
+          const t = elapsed * f.speed + f.phase;
+          dummy.position.set(
+            f.x + Math.sin(t) * f.amp,
+            f.y + Math.sin(t * 1.3 + 0.7) * 0.55,
+            f.z + Math.cos(t * 0.85) * f.amp
+          );
+          dummy.rotation.set(t, t * 0.7, 0);
+          const sc = 0.55 + (Math.sin(t * 2.2) + 1) * 0.45;
+          dummy.scale.setScalar(sc);
+          dummy.updateMatrix();
+          cocoFirefliesInst.setMatrixAt(i, dummy.matrix);
+        }
+        cocoFirefliesInst.instanceMatrix.needsUpdate = true;
+      }
+      // Cheering grandstand spectators
+      if (specBodyInst && specHeadInst && spectators.length > 0) {
+        for (let i = 0; i < spectators.length; i++) {
+          const sp = spectators[i];
+          const jump = Math.abs(Math.sin(elapsed * sp.speed + sp.phase)) * 0.34;
+          dummy.rotation.set(0, sp.yaw, Math.sin(elapsed * sp.speed + sp.phase) * 0.14);
+          dummy.scale.setScalar(1);
+          dummy.position.set(sp.x, sp.baseY + 0.26 + jump, sp.z);
+          dummy.updateMatrix();
+          specBodyInst.setMatrixAt(i, dummy.matrix);
+          dummy.position.set(sp.x, sp.baseY + 0.66 + jump, sp.z);
+          dummy.updateMatrix();
+          specHeadInst.setMatrixAt(i, dummy.matrix);
+        }
+        specBodyInst.instanceMatrix.needsUpdate = true;
+        specHeadInst.instanceMatrix.needsUpdate = true;
+      }
+    } else if (baseId === 'neon') {
       if (neonGridTex) {
         neonGridTex.offset.y = (elapsed * 0.08) % 1;
       }
-    } else if (trackId === 'rainbow') {
+      for (let i = 0; i < neonArchMats.length; i++) {
+        neonArchMats[i].emissiveIntensity = 0.85 + Math.sin(elapsed * 4.5 + i * 1.4) * 0.35;
+      }
+      if (neonRainInst && neonRainData.length > 0) {
+        for (let i = 0; i < neonRainData.length; i++) {
+          const r = neonRainData[i];
+          r.y -= r.speed * decorDt;
+          r.x -= r.speed * 0.09 * decorDt;
+          if (r.y < 0) {
+            r.y += 44;
+            r.x += 44 * 0.09;
+          }
+          dummy.position.set(r.x, r.y, r.z);
+          dummy.rotation.set(0, 0, 0.09);
+          dummy.scale.setScalar(1);
+          dummy.updateMatrix();
+          neonRainInst.setMatrixAt(i, dummy.matrix);
+        }
+        neonRainInst.instanceMatrix.needsUpdate = true;
+      }
+      for (let i = 0; i < holoBillboards.length; i++) {
+        const hb = holoBillboards[i];
+        hb.mesh.position.y = hb.baseY + Math.sin(elapsed * 2.2 + hb.phase) * 0.35;
+        const flicker = Math.sin(elapsed * 19 + hb.phase) > 0.94 ? 0.45 : 0.84;
+        hb.mat.opacity = flicker + Math.sin(elapsed * 3.0 + hb.phase) * 0.08;
+      }
+      if (cyberCarHullInst && cyberCarGlowInst && cyberTraffic.length > 0) {
+        for (let i = 0; i < cyberTraffic.length; i++) {
+          const c = cyberTraffic[i];
+          const ang = elapsed * c.speed + c.angle;
+          const cx = centerX + Math.cos(ang) * c.rx;
+          const cz = centerZ + Math.sin(ang) * c.rz;
+          const vx = -Math.sin(ang) * c.rx * c.speed;
+          const vz = Math.cos(ang) * c.rz * c.speed;
+          dummy.position.set(cx, c.y + Math.sin(elapsed * 1.8 + i) * 0.9, cz);
+          dummy.rotation.set(0, Math.atan2(vx, vz), c.speed > 0 ? -0.14 : 0.14);
+          dummy.scale.setScalar(1);
+          dummy.updateMatrix();
+          cyberCarHullInst.setMatrixAt(i, dummy.matrix);
+          cyberCarGlowInst.setMatrixAt(i, dummy.matrix);
+        }
+        cyberCarHullInst.instanceMatrix.needsUpdate = true;
+        cyberCarGlowInst.instanceMatrix.needsUpdate = true;
+      }
+    } else if (baseId === 'polar') {
+      if (snowInst && snowData.length > 0) {
+        for (let i = 0; i < snowData.length; i++) {
+          const fl = snowData[i];
+          fl.y -= fl.fallSpeed * decorDt;
+          if (fl.y < 0) fl.y += 34;
+          const sx = fl.x + Math.sin(elapsed * fl.swayFreq + fl.phase) * fl.swayAmp;
+          const sz = fl.z + Math.cos(elapsed * fl.swayFreq * 0.8 + fl.phase) * fl.swayAmp;
+          dummy.position.set(sx, fl.y, sz);
+          dummy.rotation.set(elapsed * fl.spin, elapsed * fl.spin * 0.7, fl.phase);
+          dummy.scale.setScalar(fl.scale);
+          dummy.updateMatrix();
+          snowInst.setMatrixAt(i, dummy.matrix);
+        }
+        snowInst.instanceMatrix.needsUpdate = true;
+      }
+      for (let a = 0; a < auroraRibbons.length; a++) {
+        const rib = auroraRibbons[a];
+        const arr = rib.posAttr.array;
+        const base = rib.basePos;
+        for (let v = 0; v < arr.length; v += 3) {
+          const bx = base[v];
+          const by = base[v + 1];
+          const bz = base[v + 2];
+          const wave = Math.sin(elapsed * 0.75 + bx * 0.022 + rib.phase) * 14;
+          const waveY = Math.cos(elapsed * 0.55 + bz * 0.025 + rib.phase) * 4.5;
+          arr[v] = bx + wave * 0.4;
+          arr[v + 1] = by + waveY;
+          arr[v + 2] = bz + wave;
+        }
+        rib.posAttr.needsUpdate = true;
+        rib.mat.opacity = 0.44 + Math.sin(elapsed * 0.9 + rib.phase) * 0.14;
+      }
+    } else if (baseId === 'pinball') {
+      for (let i = 0; i < bumperRings.length; i++) {
+        bumperRings[i].scale.setScalar(1 + Math.sin(elapsed * 7 + i) * 0.1);
+      }
+      for (const sp of cosmicSpinners) {
+        if (sp.speedY) sp.obj.rotation.y += decorDt * sp.speedY;
+      }
+      for (let i = 0; i < pinballSweepers.length; i++) {
+        const sw = pinballSweepers[i];
+        sw.pivot.rotation.x = sw.baseTiltX + Math.sin(elapsed * sw.speedX + sw.phase) * sw.ampX;
+        sw.pivot.rotation.z = sw.baseTiltZ + Math.cos(elapsed * sw.speedZ + sw.phase) * sw.ampZ;
+        sw.beamMat.opacity = 0.14 + (Math.sin(elapsed * 3.6 + sw.phase) + 1) * 0.055;
+      }
+    } else if (baseId === 'volcano') {
+      if (lavaTex && lavaMat) {
+        lavaTex.offset.x = (elapsed * 0.018) % 1;
+        lavaTex.offset.y = (elapsed * 0.012) % 1;
+        lavaMat.emissiveIntensity = 1.0 + Math.sin(elapsed * 2.4) * 0.35;
+      }
+      for (let i = 0; i < lavaPulseMats.length; i++) {
+        lavaPulseMats[i].opacity = 0.22 + (Math.sin(elapsed * 3.1 + i * 1.4) + 1) * 0.18;
+      }
+      if (emberInst && volcanoEmbers.length > 0) {
+        for (let i = 0; i < volcanoEmbers.length; i++) {
+          const em = volcanoEmbers[i];
+          const progress = ((elapsed * em.speed + em.phase) % 30) / 30;
+          const ey = em.baseY + progress * 30;
+          const ex = em.x + Math.sin(elapsed * em.driftFreq + em.phase) * em.driftAmp;
+          const ez = em.z + Math.cos(elapsed * em.driftFreq * 0.8 + em.phase) * em.driftAmp;
+          dummy.position.set(ex, ey, ez);
+          dummy.rotation.set(elapsed * 3 + em.phase, elapsed * 2.2, 0);
+          dummy.scale.setScalar(em.scale * (1 - progress * 0.72));
+          dummy.updateMatrix();
+          emberInst.setMatrixAt(i, dummy.matrix);
+        }
+        emberInst.instanceMatrix.needsUpdate = true;
+      }
+    } else if (baseId === 'rainbow') {
       roadMat.emissiveIntensity = 0.24 + Math.sin(elapsed * 3.2) * 0.1;
       for (const sp of cosmicSpinners) {
-        sp.obj.rotation.y += dt * sp.speedY;
+        if (sp.speedY) sp.obj.rotation.y += decorDt * sp.speedY;
+        if (sp.speedZ) sp.obj.rotation.z += decorDt * sp.speedZ;
+      }
+      if (cosmicDustInst && cosmicDustData.length > 0) {
+        for (let i = 0; i < cosmicDustData.length; i++) {
+          const d = cosmicDustData[i];
+          dummy.position.set(
+            d.x + Math.sin(elapsed * d.driftSpeed + d.phase) * 0.7,
+            d.y + Math.cos(elapsed * d.driftSpeed * 0.8 + d.phase) * 0.6,
+            d.z
+          );
+          dummy.rotation.set(elapsed * 1.8 + d.phase, elapsed * 2.1, 0);
+          const twinkle = Math.max(0.15, Math.sin(elapsed * d.twinkleSpeed + d.phase));
+          dummy.scale.setScalar(d.baseScale * twinkle);
+          dummy.updateMatrix();
+          cosmicDustInst.setMatrixAt(i, dummy.matrix);
+        }
+        cosmicDustInst.instanceMatrix.needsUpdate = true;
+      }
+      for (let i = 0; i < shootingStars.length; i++) {
+        const st = shootingStars[i];
+        const t = ((elapsed + st.offset) % st.cycle) / st.cycle;
+        const active = t < 0.45;
+        st.group.visible = active;
+        if (active) {
+          const u = t / 0.45;
+          st.group.position.set(
+            st.startX + st.vx * u,
+            st.startY + st.vy * u,
+            st.startZ + st.vz * u
+          );
+          const sc = Math.sin(u * Math.PI) * 1.15;
+          st.group.scale.set(sc, sc, Math.max(0.2, sc));
+        }
       }
     }
   }

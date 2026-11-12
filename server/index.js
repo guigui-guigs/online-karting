@@ -6,6 +6,7 @@ import express from 'express';
 import { WebSocketServer, WebSocket } from 'ws';
 import { RaceSimulation } from '../src/shared/kartPhysics.js';
 import { RACE_CONFIG, TRACKS } from '../src/shared/constants.js';
+import { getBaseTrackId } from '../src/shared/trackData.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -165,6 +166,9 @@ wss.on('connection', (ws) => {
           mode: 'online',
           roomCode: code,
           trackId: msg.trackId || 'coco',
+          gameFormat: msg.gameFormat || 'race',
+          cc: msg.cc || '100cc',
+          mirror: Boolean(msg.mirror),
           isPublic: false,
         });
         sim.botCount = 4;
@@ -172,6 +176,8 @@ wss.on('connection', (ws) => {
           id: client.id,
           name: msg.playerName || msg.name || 'Pilote',
           racerId: msg.racerId || 'red',
+          kartId: msg.kartId || 'classic',
+          boostColorId: msg.boostColorId || 'flame',
         });
 
         if (typeof msg.botCount === 'number') {
@@ -216,6 +222,9 @@ wss.on('connection', (ws) => {
             mode: 'online',
             roomCode: code,
             trackId: msg.trackId || 'coco',
+            gameFormat: msg.gameFormat || 'race',
+            cc: msg.cc || '100cc',
+            mirror: Boolean(msg.mirror),
             isPublic: true,
           });
           sim.botCount = 5;
@@ -223,6 +232,8 @@ wss.on('connection', (ws) => {
             id: client.id,
             name: msg.playerName || msg.name || 'Pilote',
             racerId: msg.racerId || 'red',
+            kartId: msg.kartId || 'classic',
+            boostColorId: msg.boostColorId || 'flame',
           });
           sim.setBotCount(RACE_CONFIG.MAX_PLAYERS - sim.players.size);
 
@@ -261,6 +272,8 @@ wss.on('connection', (ws) => {
           id: client.id,
           name: msg.playerName || msg.name || 'Pilote',
           racerId: msg.racerId || 'aqua',
+          kartId: msg.kartId || 'classic',
+          boostColorId: msg.boostColorId || 'flame',
         });
         room.sim.setBotCount(Math.max(0, RACE_CONFIG.MAX_PLAYERS - room.sim.players.size));
         room.clients.set(client.id, ws);
@@ -333,6 +346,8 @@ wss.on('connection', (ws) => {
           id: client.id,
           name: msg.playerName || msg.name || 'Pilote',
           racerId: msg.racerId || 'aqua',
+          kartId: msg.kartId || 'classic',
+          boostColorId: msg.boostColorId || 'flame',
         });
         if (room.isPublic) {
           room.sim.setBotCount(Math.max(0, RACE_CONFIG.MAX_PLAYERS - room.sim.players.size));
@@ -399,6 +414,39 @@ wss.on('connection', (ws) => {
         return;
       }
 
+      if (msg.type === 'set_room_options') {
+        if (!room.isPublic && room.sim.hostId !== client.id) {
+          sendJson(ws, {
+            type: 'error',
+            message: "Seul l'hôte peut modifier les options du salon.",
+            reqId,
+          });
+          return;
+        }
+        if (room.sim.phase === 'lobby') {
+          room.sim.setRoomOptions({
+            trackId: msg.trackId,
+            gameFormat: msg.gameFormat,
+            cc: msg.cc,
+            mirror: msg.mirror,
+          });
+          broadcastRoomState(room);
+        }
+        return;
+      }
+
+      if (msg.type === 'update_loadout') {
+        if (room.sim.phase === 'lobby') {
+          room.sim.updatePlayerLoadout(client.id, {
+            racerId: msg.racerId,
+            kartId: msg.kartId,
+            boostColorId: msg.boostColorId,
+          });
+          broadcastRoomState(room);
+        }
+        return;
+      }
+
       if (msg.type === 'set_bots') {
         if (room.sim.hostId !== client.id) {
           sendJson(ws, {
@@ -440,8 +488,8 @@ wss.on('connection', (ws) => {
             room.sim.setTrack(msg.trackId);
           } else if (room.isPublic) {
             // Cycle tracks on public rematches for fresh variety!
-            const idx = TRACKS.findIndex((t) => t.id === room.sim.trackId);
-            const nextTrack = TRACKS[(idx + 1) % TRACKS.length];
+            const idx = TRACKS.findIndex((t) => t.id === getBaseTrackId(room.sim.trackId));
+            const nextTrack = TRACKS[((idx >= 0 ? idx : 0) + 1) % TRACKS.length];
             room.sim.setTrack(nextTrack.id);
           }
           if (room.isPublic) {

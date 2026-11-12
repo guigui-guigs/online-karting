@@ -56,7 +56,65 @@ const TRACK_BLUEPRINTS = {
       { t: 0.245, lateral: 0.0, width: 5.4, length: 7.0 },
       { t: 0.735, lateral: 1.2, width: 5.4, length: 7.0 },
     ],
-    gapZones: [],
+    shortcutZones: [
+      { startT: 0.54, endT: 0.60, lateral: -9.6, halfWidth: 3.3 },
+    ],
+    gapZones: [
+      { startT: 0.36, endT: 0.43 },
+      { startT: 0.81, endT: 0.88 },
+    ],
+  },
+
+  polar: {
+    id: 'polar',
+    scaleXZ: 0.92,
+    roadHalfWidth: RACE_CONFIG.ROAD_HALF_WIDTH,
+    rawPoints: [
+      [-82, 1.2,    0],
+      [-82, 1.3,   26],
+      [-80, 1.8,   52],
+      [-64, 2.8,   78],
+      [-38, 4.0,   94],
+      [ -8, 4.8,   98],
+      [ 22, 4.6,   94],
+      [ 52, 3.8,   82],
+      [ 78, 2.8,   60],
+      [ 92, 2.2,   34],
+      [ 88, 1.8,    6],
+      [ 70, 1.6,  -16],
+      [ 66, 2.2,  -42],
+      [ 80, 3.0,  -68],
+      [ 84, 3.2,  -94],
+      [ 64, 2.6, -110],
+      [ 36, 1.8, -106],
+      [  8, 1.3,  -96],
+      [-22, 1.0,  -94],
+      [-52, 1.1,  -96],
+      [-76, 1.4,  -84],
+      [-88, 1.4,  -56],
+      [-84, 1.2,  -28],
+    ],
+    itemBoxRowsT: [0.15, 0.46, 0.76],
+    boostPadDefs: [
+      { t: 0.06, lateral: 2.0 },
+      { t: 0.34, lateral: -1.8 },
+      { t: 0.63, lateral: 1.6 },
+      { t: 0.91, lateral: 0.0 },
+    ],
+    rampDefs: [
+      { t: 0.22, lateral: 0.0, width: 5.4, length: 7.0 },
+      { t: 0.72, lateral: -1.0, width: 5.4, length: 7.0 },
+    ],
+    iceZones: [
+      { startT: 0.20, endT: 0.38 },
+      { startT: 0.65, endT: 0.84 },
+    ],
+    shortcutZones: [
+      { startT: 0.51, endT: 0.58, lateral: -9.6, halfWidth: 3.3 },
+    ],
+    gapZones: [
+      { startT: 0.43, endT: 0.49 },
+    ],
   },
 
   neon: {
@@ -101,7 +159,118 @@ const TRACK_BLUEPRINTS = {
       { t: 0.225, lateral: 0.0, width: 5.4, length: 7.2 },
       { t: 0.74, lateral: -1.0, width: 5.4, length: 7.2 },
     ],
+    shortcutZones: [
+      { startT: 0.48, endT: 0.54, lateral: -9.6, halfWidth: 3.3 },
+    ],
+    gapZones: [
+      { startT: 0.31, endT: 0.38 },
+      { startT: 0.56, endT: 0.63 },
+    ],
+  },
+
+  pinball: {
+    id: 'pinball',
+    scaleXZ: 0.92,
+    roadHalfWidth: RACE_CONFIG.ROAD_HALF_WIDTH,
+    rawPoints: [
+      [-84, 1.5,    0],
+      [-84, 1.5,   28],
+      [-82, 2.0,   58],
+      [-64, 3.0,   86],
+      [-34, 4.0,  100],
+      [ -2, 4.2,   98],
+      [ 30, 3.6,   92],
+      [ 60, 2.8,   80],
+      [ 84, 2.2,   56],
+      [ 92, 1.8,   24],
+      [ 84, 1.6,   -8],
+      [ 60, 1.8,  -30],
+      [ 54, 2.2,  -56],
+      [ 74, 2.6,  -82],
+      [ 82, 2.8, -108],
+      [ 58, 2.4, -120],
+      [ 28, 2.0, -110],
+      [  0, 1.6,  -98],
+      [-30, 1.4,  -96],
+      [-60, 1.6,  -98],
+      [-82, 1.8,  -82],
+      [-90, 1.6,  -54],
+      [-84, 1.5,  -26],
+    ],
+    itemBoxRowsT: [0.14, 0.43, 0.74],
+    boostPadDefs: [
+      { t: 0.055, lateral: -2.0 },
+      { t: 0.32, lateral: 2.0 },
+      { t: 0.58, lateral: -1.8 },
+      { t: 0.91, lateral: 1.8 },
+    ],
+    rampDefs: [
+      { t: 0.165, lateral: 0.0, width: 5.5, length: 7.2 },
+      { t: 0.50, lateral: 0.0, width: 5.5, length: 7.2 },
+      { t: 0.81, lateral: 0.0, width: 5.5, length: 7.2 },
+    ],
+    bumperDefs: [
+      { t: 0.20, lateral: 1.8, radius: 2.15 },
+      { t: 0.245, lateral: -2.2, radius: 2.15 },
+      { t: 0.46, lateral: 0.2, radius: 2.3 },
+      { t: 0.625, lateral: -2.0, radius: 2.15 },
+      { t: 0.675, lateral: 2.1, radius: 2.15 },
+      { t: 0.87, lateral: -0.6, radius: 2.2 },
+    ],
+    shortcutZones: [
+      { startT: 0.52, endT: 0.58, lateral: -9.6, halfWidth: 3.3 },
+    ],
     gapZones: [],
+  },
+
+  volcano: {
+    id: 'volcano',
+    scaleXZ: 0.94,
+    roadHalfWidth: RACE_CONFIG.ROAD_HALF_WIDTH,
+    rawPoints: [
+      [-82,  1.6,    0],
+      [-82,  2.2,   26],
+      [-78,  4.0,   54],
+      [-60,  7.0,   80],
+      [-32, 10.6,   94],
+      [  0, 12.8,   98],
+      [ 32, 13.0,   92],
+      [ 62, 11.2,   78],
+      [ 84,  8.6,   54],
+      [ 92,  6.0,   24],
+      [ 84,  4.2,   -6],
+      [ 64,  3.6,  -28],
+      [ 62,  4.8,  -56],
+      [ 78,  6.4,  -84],
+      [ 74,  6.0, -108],
+      [ 48,  4.6, -114],
+      [ 20,  3.2, -104],
+      [-10,  2.2,  -94],
+      [-40,  1.8,  -92],
+      [-68,  2.0,  -88],
+      [-86,  2.0,  -66],
+      [-86,  1.8,  -38],
+      [-82,  1.6,  -18],
+    ],
+    itemBoxRowsT: [0.13, 0.45, 0.77],
+    boostPadDefs: [
+      { t: 0.06, lateral: 0.0 },
+      { t: 0.36, lateral: 1.8 },
+      { t: 0.64, lateral: -1.8 },
+      { t: 0.92, lateral: 0.0 },
+    ],
+    rampDefs: [
+      { t: 0.21, lateral: 0.0, width: 5.5, length: 7.4 },
+      { t: 0.51, lateral: 0.8, width: 5.5, length: 7.4 },
+      { t: 0.82, lateral: -0.8, width: 5.5, length: 7.4 },
+    ],
+    shortcutZones: [
+      { startT: 0.56, endT: 0.63, lateral: -9.8, halfWidth: 3.4 },
+    ],
+    gapZones: [
+      { startT: 0.27, endT: 0.34 },
+      { startT: 0.70, endT: 0.77 },
+    ],
   },
 
   rainbow: {
@@ -146,8 +315,9 @@ const TRACK_BLUEPRINTS = {
       { t: 0.715, lateral: 0.0, width: 5.6, length: 7.4 },
     ],
     gapZones: [
-      { startT: 0.29, endT: 0.36 },
-      { startT: 0.74, endT: 0.81 },
+      { startT: 0.29, endT: 0.37 },
+      { startT: 0.55, endT: 0.62 },
+      { startT: 0.76, endT: 0.83 },
     ],
   },
 };
@@ -198,9 +368,10 @@ const ARC_SUBSTEPS = 2048;
 const PROJ_N = 512;
 const PROJ_COARSE_STEP = 4;
 
-function compileTrack(blueprint) {
+function compileTrack(blueprint, { mirror = false } = {}) {
+  const latSign = mirror ? -1 : 1;
   const controlPoints = blueprint.rawPoints.map(([x, y, z]) => ({
-    x: +(x * blueprint.scaleXZ).toFixed(3),
+    x: +((mirror ? -x : x) * blueprint.scaleXZ).toFixed(3),
     y: +y.toFixed(3),
     z: +(z * blueprint.scaleXZ).toFixed(3),
   }));
@@ -275,6 +446,12 @@ function compileTrack(blueprint) {
     return (lo + frac) / ARC_SUBSTEPS;
   }
 
+  const iceZones = (blueprint.iceZones || []).map((z) => ({ ...z }));
+  const shortcutZones = (blueprint.shortcutZones || []).map((sz) => ({
+    ...sz,
+    lateral: sz.lateral * latSign,
+  }));
+
   function sampleAt(t) {
     const tw = wrap01(t);
     const u = arcTToRawU(tw);
@@ -283,6 +460,7 @@ function compileTrack(blueprint) {
       t: tw,
       ...s,
       hasGuardrail: !isInsideGapZone(tw, blueprint.gapZones),
+      inIceZone: isInsideGapZone(tw, iceZones),
     };
   }
 
@@ -309,31 +487,93 @@ function compileTrack(blueprint) {
 
   const boostPadSpots = blueprint.boostPadDefs.map((def, id) => {
     const s = sampleAt(def.t);
+    const lateral = def.lateral * latSign;
     return {
       id,
       t: s.t,
-      lateral: def.lateral,
-      x: s.x + s.nx * def.lateral,
+      lateral,
+      x: s.x + s.nx * lateral,
       y: s.y,
-      z: s.z + s.nz * def.lateral,
+      z: s.z + s.nz * lateral,
       yaw: s.yaw,
     };
   });
 
+  // Add shortcut boost pad at midpoint of each off-road shortcut strip
+  for (const sz of shortcutZones) {
+    const midT = (sz.startT + sz.endT) * 0.5;
+    const s = sampleAt(midT);
+    boostPadSpots.push({
+      id: boostPadSpots.length,
+      t: s.t,
+      lateral: sz.lateral,
+      x: s.x + s.nx * sz.lateral,
+      y: s.y,
+      z: s.z + s.nz * sz.lateral,
+      yaw: s.yaw,
+      isShortcut: true,
+    });
+  }
+
   const rampSpots = blueprint.rampDefs.map((def, id) => {
     const s = sampleAt(def.t);
+    const lateral = def.lateral * latSign;
     return {
       id,
       t: s.t,
-      lateral: def.lateral,
+      lateral,
       width: def.width,
       length: def.length,
-      x: s.x + s.nx * def.lateral,
+      x: s.x + s.nx * lateral,
       y: s.y,
-      z: s.z + s.nz * def.lateral,
+      z: s.z + s.nz * lateral,
       yaw: s.yaw,
     };
   });
+
+  const bumperSpots = (blueprint.bumperDefs || []).map((def, id) => {
+    const s = sampleAt(def.t);
+    const lateral = def.lateral * latSign;
+    return {
+      id,
+      t: s.t,
+      lateral,
+      radius: def.radius || 2.2,
+      x: s.x + s.nx * lateral,
+      y: s.y,
+      z: s.z + s.nz * lateral,
+    };
+  });
+
+  const coinGroups = [
+    { startT: 0.085, step: 0.012, lateral: -1.6 * latSign },
+    { startT: 0.345, step: 0.012, lateral: 2.0 * latSign },
+    { startT: 0.595, step: 0.012, lateral: 0.0 },
+    { startT: 0.875, step: 0.012, lateral: -1.8 * latSign },
+  ];
+  const coinSpots = [];
+  let coinId = 0;
+  for (const grp of coinGroups) {
+    for (let k = 0; k < 4; k += 1) {
+      const ct = wrap01(grp.startT + k * grp.step);
+      const s = sampleAt(ct);
+      let lat = grp.lateral;
+      // Avoid clipping inside pinball bumpers
+      for (const bmp of bumperSpots) {
+        if (Math.hypot(s.x + s.nx * lat - bmp.x, s.z + s.nz * lat - bmp.z) < bmp.radius + 1.8) {
+          lat = -lat || 2.8 * latSign;
+        }
+      }
+      coinSpots.push({
+        id: coinId++,
+        t: s.t,
+        lateral: lat,
+        x: s.x + s.nx * lat,
+        y: s.y,
+        z: s.z + s.nz * lat,
+      });
+    }
+  }
 
   const gapZones = blueprint.gapZones.map((gz) => ({ ...gz }));
 
@@ -394,7 +634,9 @@ function compileTrack(blueprint) {
   });
 
   return {
-    id: blueprint.id,
+    id: mirror ? `${blueprint.id}__mirror` : blueprint.id,
+    baseId: blueprint.id,
+    isMirror: mirror,
     controlPoints,
     length,
     roadHalfWidth: blueprint.roadHalfWidth,
@@ -403,20 +645,142 @@ function compileTrack(blueprint) {
     itemBoxSpots,
     boostPadSpots,
     rampSpots,
+    bumperSpots,
+    coinSpots,
+    iceZones,
+    shortcutZones,
     gapZones,
     turnSigns,
     gapMarkers,
   };
 }
 
-const COMPILED_TRACKS = {
-  coco: compileTrack(TRACK_BLUEPRINTS.coco),
-  neon: compileTrack(TRACK_BLUEPRINTS.neon),
-  rainbow: compileTrack(TRACK_BLUEPRINTS.rainbow),
-};
+export function parseTrackKey(trackKey = 'coco') {
+  if (!trackKey || trackKey === 'arena') {
+    return { baseId: trackKey === 'arena' ? 'arena' : 'coco', isMirror: false };
+  }
+  if (trackKey.endsWith('__mirror')) {
+    return { baseId: trackKey.slice(0, -8), isMirror: true };
+  }
+  return { baseId: trackKey, isMirror: false };
+}
+
+export function getBaseTrackId(trackKey = 'coco') {
+  return parseTrackKey(trackKey).baseId;
+}
+
+export function getTrackKey(baseId = 'coco', mirror = false) {
+  if (baseId === 'arena') return 'arena';
+  const cleanBase = getBaseTrackId(baseId);
+  return mirror ? `${cleanBase}__mirror` : cleanBase;
+}
+
+export function isArenaTrack(trackKey = 'coco') {
+  return trackKey === 'arena';
+}
+
+export const ARENA_DATA = (() => {
+  const radius = RACE_CONFIG.ARENA_RADIUS || 48;
+  const itemBoxSpots = [];
+  let boxId = 0;
+  for (let i = 0; i < 4; i += 1) {
+    const a1 = (i * Math.PI) / 2 + Math.PI / 4;
+    itemBoxSpots.push({
+      id: boxId++,
+      x: Math.cos(a1) * 16,
+      y: 0.6,
+      z: Math.sin(a1) * 16,
+    });
+    const a2 = (i * Math.PI) / 2;
+    itemBoxSpots.push({
+      id: boxId++,
+      x: Math.cos(a2) * 33,
+      y: 0.6,
+      z: Math.sin(a2) * 33,
+    });
+  }
+
+  const boostPadSpots = [];
+  for (let i = 0; i < 4; i += 1) {
+    const a = (i * Math.PI) / 2 + Math.PI / 4;
+    boostPadSpots.push({
+      id: i,
+      x: Math.cos(a) * 29,
+      y: 0.6,
+      z: Math.sin(a) * 29,
+      yaw: Math.atan2(-Math.cos(a), -Math.sin(a)),
+    });
+  }
+
+  const coinSpots = [];
+  for (let i = 0; i < 12; i += 1) {
+    const a = (i / 12) * Math.PI * 2;
+    const r = i % 2 === 0 ? 11 : 25;
+    coinSpots.push({
+      id: i,
+      x: Math.cos(a) * r,
+      y: 0.6,
+      z: Math.sin(a) * r,
+    });
+  }
+
+  const pillars = [0, 1, 2, 3].map((i) => {
+    const a = (i * Math.PI) / 2 + Math.PI / 4;
+    return {
+      id: i,
+      x: Math.cos(a) * 21,
+      z: Math.sin(a) * 21,
+      radius: 2.5,
+    };
+  });
+
+  const bumperSpots = [
+    { id: 0, x: 0, y: 0.6, z: 0, radius: 2.8 },
+  ];
+
+  return {
+    id: 'arena',
+    baseId: 'arena',
+    isArena: true,
+    radius,
+    floorY: 0.6,
+    length: radius * Math.PI * 2,
+    roadHalfWidth: radius,
+    itemBoxSpots,
+    boostPadSpots,
+    coinSpots,
+    pillars,
+    bumperSpots,
+    rampSpots: [],
+    iceZones: [],
+    shortcutZones: [],
+    gapZones: [],
+    turnSigns: [],
+    gapMarkers: [],
+  };
+})();
+
+const COMPILED_TRACKS = {};
+for (const key of Object.keys(TRACK_BLUEPRINTS)) {
+  COMPILED_TRACKS[key] = compileTrack(TRACK_BLUEPRINTS[key], { mirror: false });
+  COMPILED_TRACKS[`${key}__mirror`] = compileTrack(TRACK_BLUEPRINTS[key], { mirror: true });
+}
 
 function resolveTrack(trackId = 'coco') {
   return COMPILED_TRACKS[trackId] || COMPILED_TRACKS.coco;
+}
+
+export function isPointInShortcut(t, lateralOffset, trackId = 'coco') {
+  if (isArenaTrack(trackId)) return false;
+  const tr = resolveTrack(trackId);
+  const zones = tr.shortcutZones || [];
+  for (let i = 0; i < zones.length; i += 1) {
+    const sz = zones[i];
+    if (t >= sz.startT && t <= sz.endT && Math.abs(lateralOffset - sz.lateral) <= sz.halfWidth) {
+      return true;
+    }
+  }
+  return false;
 }
 
 export function getTrackSample(t, trackId = 'coco') {
@@ -502,14 +866,24 @@ export function projectOnTrack(x, z, trackId = 'coco') {
 }
 
 export function getTrackMeta(trackId = 'coco') {
+  if (isArenaTrack(trackId)) {
+    return ARENA_DATA;
+  }
   const tr = resolveTrack(trackId);
   return {
     id: tr.id,
+    baseId: tr.baseId,
+    isMirror: tr.isMirror,
+    isArena: false,
     length: tr.length,
     roadHalfWidth: tr.roadHalfWidth,
     itemBoxSpots: tr.itemBoxSpots,
     boostPadSpots: tr.boostPadSpots,
     rampSpots: tr.rampSpots,
+    bumperSpots: tr.bumperSpots,
+    coinSpots: tr.coinSpots,
+    iceZones: tr.iceZones,
+    shortcutZones: tr.shortcutZones,
     gapZones: tr.gapZones,
     turnSigns: tr.turnSigns,
     gapMarkers: tr.gapMarkers,

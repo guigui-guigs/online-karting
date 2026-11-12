@@ -1,0 +1,28 @@
+{
+  "name": "PocketKart 3D — Édition Ultime",
+  "short_name": "PocketKart 3D",
+  "description": "Course d'arcade 3D multijoueur avec pilotage gyroscopique, post-processing HDR, podium 3D et 6 circuits !",
+  "lang": "fr",
+  "start_url": "/",
+  "scope": "/",
+  "display": "fullscreen",
+  "display_override": ["fullscreen", "standalone"],
+  "orientation": "landscape",
+  "background_color": "#090f24",
+  "theme_color": "#090f24",
+  "categories": ["games", "racing", "entertainment"],
+  "icons": [
+    {
+      "src": "/icons/icon-192.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/icons/icon-512.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

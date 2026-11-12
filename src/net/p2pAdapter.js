@@ -1,6 +1,7 @@
 import * as PeerJS from 'peerjs';
 import { RaceSimulation } from '../shared/kartPhysics.js';
 import { RACE_CONFIG, TRACKS } from '../shared/constants.js';
+import { getBaseTrackId } from '../shared/trackData.js';
 
 const ResolvedPeer = PeerJS.Peer || PeerJS.default?.Peer || PeerJS.default;
 
@@ -14,8 +15,27 @@ const ROOM_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
 
 export const DEFAULT_ICE_SERVERS = [
   { urls: 'stun:stun.l.google.com:19302' },
+  { urls: 'stun:stun1.l.google.com:19302' },
   { urls: 'stun:global.stun.twilio.com:3478' },
 ];
+
+export function resolveIceServers() {
+  try {
+    const raw =
+      typeof import.meta !== 'undefined' &&
+      import.meta.env &&
+      import.meta.env.VITE_ICE_SERVERS_JSON;
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
+      }
+    }
+  } catch {
+    // Ignore malformed VITE_ICE_SERVERS_JSON
+  }
+  return DEFAULT_ICE_SERVERS;
+}
 
 export function generateP2PRoomCode() {
   let code = '';
@@ -48,7 +68,12 @@ export class P2PRoomHost {
     peerId,
     playerName = 'Pilote',
     racerId = 'red',
+    kartId = 'classic',
+    boostColorId = 'flame',
     trackId = 'coco',
+    gameFormat = 'race',
+    cc = '100cc',
+    mirror = false,
     isPublic = false,
     botCount,
     PeerClass = ResolvedPeer,
@@ -60,7 +85,12 @@ export class P2PRoomHost {
     this.peerId = peerId || roomCodeToPeerId(this.roomCode);
     this.playerName = playerName;
     this.racerId = racerId;
+    this.kartId = kartId || 'classic';
+    this.boostColorId = boostColorId || 'flame';
     this.trackId = trackId || 'coco';
+    this.gameFormat = gameFormat || 'race';
+    this.cc = cc || '100cc';
+    this.mirror = Boolean(mirror);
     this.isPublic = Boolean(isPublic);
     this.initialBotCount = botCount;
 
@@ -74,6 +104,8 @@ export class P2PRoomHost {
     this.sim = null;
     /** @type {Map<string, any>} guestId -> DataConnection */
     this.guests = new Map();
+    /** @type {Map<string, any>} guestId -> grace timeout id */
+    this._graceTimers = new Map();
     this._guestSeq = 1;
 
     this.autoStartAtMs = null;
@@ -95,7 +127,7 @@ export class P2PRoomHost {
       let peer;
       try {
         peer = new this.PeerClass(this.peerId, {
-          config: { iceServers: DEFAULT_ICE_SERVERS },
+          config: { iceServers: resolveIceServers() },
         });
       } catch (err) {
         reject(err);
@@ -160,6 +192,9 @@ export class P2PRoomHost {
       roomCode: this.roomCode,
       trackId: this.trackId,
       isPublic: this.isPublic,
+      gameFormat: this.gameFormat,
+      cc: this.cc,
+      mirror: this.mirror,
     });
     this.sim.botCount = this.isPublic
       ? 5
@@ -171,6 +206,8 @@ export class P2PRoomHost {
       id: this.localId,
       name: this.playerName,
       racerId: this.racerId,
+      kartId: this.kartId,
+      boostColorId: this.boostColorId,
     });
 
     if (this.isPublic) {
@@ -252,20 +289,45 @@ export class P2PRoomHost {
       return;
     }
 
-    const guestId = `p_guest_${this._guestSeq++}`;
+    let guestId = `p_guest_${this._guestSeq++}`;
     let joined = false;
 
-    const cleanupGuest = () => {
-      if (!joined) return;
-      joined = false;
-      this.guests.delete(guestId);
-      if (this.sim && !this._destroyed) {
+    const finalizeRemoveGuest = () => {
+      const existingTimer = this._graceTimers.get(guestId);
+      if (existingTimer) {
+        clearTimeout(existingTimer);
+        this._graceTimers.delete(guestId);
+      }
+      if (this.guests.get(guestId) === conn) {
+        this.guests.delete(guestId);
+      }
+      if (this.sim && !this._destroyed && !this.guests.has(guestId)) {
         this.sim.removePlayer(guestId);
         if (this.isPublic && this.sim.phase === 'lobby') {
           this.sim.setBotCount(Math.max(0, RACE_CONFIG.MAX_PLAYERS - this.sim.players.size));
         }
         this._emitHostStateAndBroadcast();
       }
+    };
+
+    const cleanupGuest = (immediate = false) => {
+      if (!joined) return;
+      joined = false;
+      if (this.guests.get(guestId) === conn) {
+        this.guests.delete(guestId);
+      }
+      if (immediate === true || this._destroyed || !this.sim) {
+        finalizeRemoveGuest();
+        return;
+      }
+      const prevTimer = this._graceTimers.get(guestId);
+      if (prevTimer) clearTimeout(prevTimer);
+      const graceTimer = setTimeout(() => {
+        this._graceTimers.delete(guestId);
+        finalizeRemoveGuest();
+      }, 6000);
+      graceTimer.unref?.();
+      this._graceTimers.set(guestId, graceTimer);
     };
 
     conn.on('data', (raw) => {
@@ -282,6 +344,34 @@ export class P2PRoomHost {
       const reqId = msg.reqId ?? null;
 
       if (msg.type === 'join_room' || msg.type === 'join_public') {
+        const resumeId = typeof msg.resumePlayerId === 'string' ? msg.resumePlayerId : null;
+        if (resumeId && this.sim.players.has(resumeId)) {
+          guestId = resumeId;
+          const pendingTimer = this._graceTimers.get(guestId);
+          if (pendingTimer) {
+            clearTimeout(pendingTimer);
+            this._graceTimers.delete(guestId);
+          }
+          joined = true;
+          this.guests.set(guestId, conn);
+
+          const resumeState = this.sim.getState({
+            localId: guestId,
+            sinceEventId: this._lastBroadcastEventId,
+          });
+          this._sendToConn(conn, {
+            type: 'room_joined',
+            roomCode: this.roomCode,
+            isPublic: this.isPublic,
+            playerId: guestId,
+            hostId: this.sim.hostId,
+            reqId,
+            state: resumeState,
+          });
+          this._emitHostStateAndBroadcast();
+          return;
+        }
+
         if (this.sim.phase !== 'lobby') {
           this._sendToConn(conn, {
             type: 'error',
@@ -306,6 +396,8 @@ export class P2PRoomHost {
             id: guestId,
             name: msg.playerName || msg.name || 'Pilote',
             racerId: msg.racerId || 'aqua',
+            kartId: msg.kartId || 'classic',
+            boostColorId: msg.boostColorId || 'flame',
           });
         } catch (err) {
           this._sendToConn(conn, {
@@ -352,7 +444,7 @@ export class P2PRoomHost {
       if (!joined) return;
 
       if (msg.type === 'leave') {
-        cleanupGuest();
+        cleanupGuest(true);
         try {
           conn.close();
         } catch {
@@ -399,6 +491,39 @@ export class P2PRoomHost {
         }
         if (this.sim.phase === 'lobby') {
           this.sim.setTrack(msg.trackId || msg.track || 'coco');
+          this._emitHostStateAndBroadcast();
+        }
+        return;
+      }
+
+      if (msg.type === 'set_room_options') {
+        if (!this.isPublic && this.sim.hostId !== guestId) {
+          this._sendToConn(conn, {
+            type: 'error',
+            message: "Seul l'hôte peut modifier les options du salon.",
+            reqId,
+          });
+          return;
+        }
+        if (this.sim.phase === 'lobby') {
+          this.sim.setRoomOptions({
+            trackId: msg.trackId,
+            gameFormat: msg.gameFormat,
+            cc: msg.cc,
+            mirror: msg.mirror,
+          });
+          this._emitHostStateAndBroadcast();
+        }
+        return;
+      }
+
+      if (msg.type === 'update_loadout') {
+        if (this.sim.phase === 'lobby') {
+          this.sim.updatePlayerLoadout(guestId, {
+            racerId: msg.racerId,
+            kartId: msg.kartId,
+            boostColorId: msg.boostColorId,
+          });
           this._emitHostStateAndBroadcast();
         }
         return;
@@ -559,6 +684,18 @@ export class P2PRoomHost {
     this._emitHostStateAndBroadcast();
   }
 
+  setRoomOptions(opts = {}) {
+    if (!this.sim || this.sim.phase !== 'lobby') return;
+    this.sim.setRoomOptions(opts);
+    this._emitHostStateAndBroadcast();
+  }
+
+  updateLoadout(opts = {}) {
+    if (!this.sim || this.sim.phase !== 'lobby') return;
+    this.sim.updatePlayerLoadout(this.localId, opts);
+    this._emitHostStateAndBroadcast();
+  }
+
   startRace() {
     if (!this.sim) return;
     if (this.sim.phase === 'lobby' || this.sim.phase === 'finished') {
@@ -575,8 +712,8 @@ export class P2PRoomHost {
     if (trackId) {
       this.sim.setTrack(trackId);
     } else if (this.isPublic) {
-      const idx = TRACKS.findIndex((t) => t.id === this.sim.trackId);
-      const nextTrack = TRACKS[(idx + 1) % TRACKS.length];
+      const idx = TRACKS.findIndex((t) => t.id === getBaseTrackId(this.sim.trackId));
+      const nextTrack = TRACKS[((idx >= 0 ? idx : 0) + 1) % TRACKS.length];
       this.sim.setTrack(nextTrack.id);
     }
     if (this.isPublic) {
@@ -621,6 +758,11 @@ export class P2PRoomHost {
       this._bgInterval = null;
     }
 
+    for (const [, timer] of this._graceTimers.entries()) {
+      clearTimeout(timer);
+    }
+    this._graceTimers.clear();
+
     for (const [, conn] of this.guests.entries()) {
       try {
         conn.close();
@@ -660,25 +802,145 @@ export class P2PRoomGuest {
 
     this.peer = null;
     this.conn = null;
+    this.localPlayerId = null;
+    this._joinPayload = null;
+    this._reconnecting = false;
+    this._reconnectTimer = null;
     this._destroyed = false;
+  }
+
+  _bindDataConnection(conn, { isInitial = false, onInitialJoined = null, onInitialFail = null } = {}) {
+    this.conn = conn;
+
+    conn.on('open', () => {
+      if (this._destroyed || this.conn !== conn) return;
+      this.send({
+        ...this._joinPayload,
+        resumePlayerId: this.localPlayerId || undefined,
+        reqId: isInitial ? 'p2p_join_1' : `p2p_rejoin_${Date.now()}`,
+      });
+    });
+
+    conn.on('data', (raw) => {
+      if (this._destroyed || this.conn !== conn) return;
+      let msg = raw;
+      if (typeof raw === 'string') {
+        try {
+          msg = JSON.parse(raw);
+        } catch {
+          return;
+        }
+      }
+      if (!msg || typeof msg.type !== 'string') return;
+
+      if (msg.type === 'room_joined') {
+        if (msg.playerId) {
+          this.localPlayerId = msg.playerId;
+        }
+        this._reconnecting = false;
+        if (this._reconnectTimer) {
+          clearTimeout(this._reconnectTimer);
+          this._reconnectTimer = null;
+        }
+        if (isInitial && onInitialJoined) {
+          onInitialJoined(msg);
+          return;
+        }
+      } else if (msg.type === 'error' && isInitial && onInitialFail) {
+        onInitialFail(msg.message || 'Impossible de rejoindre ce salon.', msg.code || 'ROOM_ERROR');
+        return;
+      }
+
+      this.onMessage?.(msg);
+    });
+
+    conn.on('close', () => {
+      if (this.conn !== conn || this._destroyed) return;
+      if (isInitial && onInitialFail) {
+        onInitialFail('Connexion fermée par l’hôte.', 'CLOSED');
+        return;
+      }
+      this._attemptAutoReconnect();
+    });
+
+    conn.on('error', () => {
+      if (this.conn !== conn || this._destroyed) return;
+      if (isInitial && onInitialFail) {
+        onInitialFail('Erreur sur le canal de données P2P.', 'CONN_ERROR');
+      }
+    });
+  }
+
+  _attemptAutoReconnect() {
+    if (this._destroyed || this._reconnecting || !this.peer || !this._joinPayload) return;
+    this._reconnecting = true;
+    const delays = [800, 1600, 2200];
+    let attempt = 0;
+
+    const tryNext = () => {
+      if (this._destroyed || !this._reconnecting) return;
+      if (attempt >= delays.length) {
+        this._reconnecting = false;
+        this._destroyed = true;
+        this.onDisconnect?.();
+        return;
+      }
+
+      const waitMs = delays[attempt++];
+      this._reconnectTimer = setTimeout(() => {
+        if (this._destroyed || !this._reconnecting || !this.peer) return;
+        try {
+          if (this.peer.disconnected && typeof this.peer.reconnect === 'function') {
+            this.peer.reconnect();
+          }
+          const nextConn = this.peer.connect(this.peerId, {
+            reliable: true,
+            serialization: 'json',
+          });
+          if (!nextConn) {
+            tryNext();
+            return;
+          }
+          this._bindDataConnection(nextConn, { isInitial: false });
+          // Schedule next check in case this attempt fails to open/rejoin
+          tryNext();
+        } catch {
+          tryNext();
+        }
+      }, waitMs);
+    };
+
+    tryNext();
   }
 
   connectAndJoin({
     joinType = 'join_room',
     playerName = 'Pilote',
     racerId = 'red',
+    kartId = 'classic',
+    boostColorId = 'flame',
     trackId = 'coco',
   } = {}) {
     if (!this.PeerClass) {
       return Promise.reject(new Error('PeerJS non disponible dans cet environnement.'));
     }
 
+    this._joinPayload = {
+      type: joinType,
+      roomCode: this.roomCode,
+      playerName,
+      racerId,
+      kartId,
+      boostColorId,
+      trackId,
+    };
+
     return new Promise((resolve, reject) => {
       let settled = false;
       let peer;
       try {
         peer = new this.PeerClass({
-          config: { iceServers: DEFAULT_ICE_SERVERS },
+          config: { iceServers: resolveIceServers() },
         });
       } catch (err) {
         reject(err);
@@ -720,65 +982,27 @@ export class P2PRoomGuest {
           return;
         }
 
-        this.conn = conn;
-
-        conn.on('open', () => {
-          if (settled || this._destroyed) return;
-          this.send({
-            type: joinType,
-            roomCode: this.roomCode,
-            playerName,
-            racerId,
-            trackId,
-            reqId: 'p2p_join_1',
-          });
-        });
-
-        conn.on('data', (raw) => {
-          if (this._destroyed) return;
-          let msg = raw;
-          if (typeof raw === 'string') {
-            try {
-              msg = JSON.parse(raw);
-            } catch {
-              return;
+        this._bindDataConnection(conn, {
+          isInitial: true,
+          onInitialJoined: (msg) => {
+            if (settled) return;
+            settled = true;
+            clearTimeout(joinTimeout);
+            // Switch connection handlers to post-join mode so subsequent close triggers auto-reconnect
+            onInitialFailRef.fn = null;
+            resolve(msg);
+          },
+          onInitialFail: (message, code) => {
+            if (onInitialFailRef.fn) {
+              onInitialFailRef.fn(message, code);
+            } else {
+              this._attemptAutoReconnect();
             }
-          }
-          if (!msg || typeof msg.type !== 'string') return;
-
-          if (!settled) {
-            if (msg.type === 'room_joined') {
-              settled = true;
-              clearTimeout(joinTimeout);
-              resolve(msg);
-              return;
-            }
-            if (msg.type === 'error') {
-              failJoin(msg.message || 'Impossible de rejoindre ce salon.', msg.code || 'ROOM_ERROR');
-              return;
-            }
-          }
-
-          this.onMessage?.(msg);
-        });
-
-        conn.on('close', () => {
-          if (!settled) {
-            failJoin('Connexion fermée par l’hôte.', 'CLOSED');
-            return;
-          }
-          if (!this._destroyed) {
-            this._destroyed = true;
-            this.onDisconnect?.();
-          }
-        });
-
-        conn.on('error', () => {
-          if (!settled) {
-            failJoin('Erreur sur le canal de données P2P.', 'CONN_ERROR');
-          }
+          },
         });
       });
+
+      const onInitialFailRef = { fn: failJoin };
 
       peer.on('error', (err) => {
         if (!settled) {
@@ -786,6 +1010,14 @@ export class P2PRoomGuest {
             failJoin(`Salon "${this.roomCode}" introuvable.`, 'PEER_UNAVAILABLE');
           } else {
             failJoin(err?.message || 'Serveur de signalisation P2P injoignable.', err?.type || 'PEER_ERROR');
+          }
+          return;
+        }
+        if (err?.type === 'network' || err?.type === 'disconnected') {
+          try {
+            peer.reconnect?.();
+          } catch {
+            // Ignore
           }
         }
       });
@@ -804,6 +1036,11 @@ export class P2PRoomGuest {
   destroy() {
     if (this._destroyed) return;
     this._destroyed = true;
+    this._reconnecting = false;
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer);
+      this._reconnectTimer = null;
+    }
 
     if (this.conn) {
       if (this.conn.open) {
@@ -838,7 +1075,12 @@ export class P2PRoomGuest {
 export async function createPrivateP2PHost({
   playerName = 'Pilote',
   racerId = 'red',
+  kartId = 'classic',
+  boostColorId = 'flame',
   trackId = 'coco',
+  gameFormat = 'race',
+  cc = '100cc',
+  mirror = false,
   PeerClass = ResolvedPeer,
   onState = null,
   onEvent = null,
@@ -852,7 +1094,12 @@ export async function createPrivateP2PHost({
       peerId: roomCodeToPeerId(roomCode),
       playerName,
       racerId,
+      kartId,
+      boostColorId,
       trackId,
+      gameFormat,
+      cc,
+      mirror,
       isPublic: false,
       PeerClass,
       onState,
@@ -882,7 +1129,12 @@ export async function createPrivateP2PHost({
 export async function joinPublicP2PMatch({
   playerName = 'Pilote',
   racerId = 'red',
+  kartId = 'classic',
+  boostColorId = 'flame',
   trackId = 'coco',
+  gameFormat = 'race',
+  cc = '100cc',
+  mirror = false,
   PeerClass = ResolvedPeer,
   onHostState = null,
   onHostEvent = null,
@@ -900,7 +1152,12 @@ export async function joinPublicP2PMatch({
       peerId,
       playerName,
       racerId,
+      kartId,
+      boostColorId,
       trackId,
+      gameFormat,
+      cc,
+      mirror,
       isPublic: true,
       PeerClass,
       onState: onHostState,
@@ -936,6 +1193,8 @@ export async function joinPublicP2PMatch({
         joinType: 'join_public',
         playerName,
         racerId,
+        kartId,
+        boostColorId,
         trackId,
       });
       return {
@@ -966,7 +1225,12 @@ export async function joinPublicP2PMatch({
     peerId: roomCodeToPeerId(overflowCode),
     playerName,
     racerId,
+    kartId,
+    boostColorId,
     trackId,
+    gameFormat,
+    cc,
+    mirror,
     isPublic: true,
     PeerClass,
     onState: onHostState,

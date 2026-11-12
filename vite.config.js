@@ -21,5 +21,21 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    chunkSizeWarningLimit: 900,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (/[\\/]node_modules[\\/]three[\\/]/.test(id)) {
+            return 'three';
+          }
+          if (/[\\/]node_modules[\\/]peerjs[\\/]/.test(id)) {
+            return 'peerjs';
+          }
+          if (/[\\/]node_modules[\\/]@supabase[\\/]/.test(id)) {
+            return 'supabase';
+          }
+        },
+      },
+    },
   },
 });

@@ -1,37 +1,89 @@
 <!DOCTYPE html>
-<html lang="fr">
+<html
+  lang="fr"
+  style="margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; background: #090f24;"
+>
   <head>
     <meta charset="UTF-8" />
     <meta
       name="viewport"
       content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
     />
-    <meta name="theme-color" content="#00bbf9" />
+    <meta name="theme-color" content="#090f24" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="PocketKart 3D" />
     <meta
       name="description"
-      content="PocketKart 3D — Course d'arcade multijoueur haute en couleur sur mobile et PC !"
+      content="PocketKart 3D — Édition Ultime V5 : course d'arcade 3D multijoueur avec post-processing HDR, podium 3D, manettes et 6 circuits !"
     />
     <title>PocketKart 3D 🏎️</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="apple-touch-icon" href="/icons/apple-touch-icon.svg" />
     <link
       rel="icon"
-      href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🏎️</text></svg>"
+      type="image/svg+xml"
+      href="/icons/icon-192.svg"
     />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700&family=Nunito:wght@600;800&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Exo+2:ital,wght@0,600;0,700;0,800;0,900;1,800&family=Fredoka:wght@600;700&family=Nunito:wght@600;800&display=swap"
       rel="stylesheet"
     />
-    <style>
-      html, body { margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; background: #1ca3ec; }
-    </style>
   </head>
-  <body>
-    <div id="canvas-container"></div>
-    <div id="ui-root"></div>
+  <body
+    style="margin: 0; padding: 0; width: 100%; height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; background: radial-gradient(circle at 50% 35%, #16244f 0%, #090f24 75%); color: #f8fafc; font-family: 'Exo 2', 'Nunito', system-ui, -apple-system, sans-serif;"
+  >
+    <div id="canvas-container" style="position: fixed; inset: 0; width: 100%; height: 100%; touch-action: none;"></div>
+    <div id="ui-root" style="position: fixed; inset: 0; width: 100%; height: 100%;"></div>
+    <div
+      id="pk-boot-loader"
+      role="status"
+      aria-live="polite"
+      style="position: fixed; inset: 0; z-index: 9999; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding: 24px; text-align: center; background: radial-gradient(circle at 50% 38%, #1a2d66 0%, #0b132b 65%, #060a18 100%); transition: opacity 0.38s ease, visibility 0.38s ease; pointer-events: none;"
+    >
+      <div
+        style="width: 82px; height: 82px; border-radius: 24px; display: flex; align-items: center; justify-content: center; font-size: 42px; background: linear-gradient(135deg, #38bdf8 0%, #6366f1 55%, #f43f5e 100%); box-shadow: 0 14px 36px rgba(56, 189, 248, 0.35), inset 0 2px 4px rgba(255, 255, 255, 0.45);"
+      >
+        🏎️
+      </div>
+      <div
+        style="font-size: 28px; font-weight: 900; letter-spacing: 0.08em; text-transform: uppercase; color: #ffffff; text-shadow: 0 4px 18px rgba(56, 189, 248, 0.45);"
+      >
+        PocketKart 3D
+      </div>
+      <div
+        style="font-size: 11px; font-weight: 800; letter-spacing: 0.2em; text-transform: uppercase; color: #7dd3fc; padding: 5px 14px; border-radius: 999px; background: rgba(56, 189, 248, 0.14); border: 1px solid rgba(125, 211, 252, 0.35);"
+      >
+        Édition Ultime V5
+      </div>
+      <div
+        style="width: 190px; height: 6px; border-radius: 999px; overflow: hidden; background: rgba(255, 255, 255, 0.12); border: 1px solid rgba(255, 255, 255, 0.15); margin-top: 4px;"
+      >
+        <div
+          style="width: 68%; height: 100%; border-radius: 999px; background: linear-gradient(90deg, #38bdf8, #f472b6, #fbbf24);"
+        ></div>
+      </div>
+      <div
+        style="font-size: 13px; font-weight: 700; color: rgba(226, 232, 240, 0.8);"
+      >
+        Préparation du Paddock 3D…
+      </div>
+    </div>
     <script type="module" src="/src/main.js"></script>
+    <script>
+      if (
+        'serviceWorker' in navigator &&
+        location.protocol === 'https:' &&
+        location.hostname !== 'localhost' &&
+        location.hostname !== '127.0.0.1'
+      ) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('/sw.js').catch(() => {});
+        });
+      }
+    </script>
   </body>
 </html>

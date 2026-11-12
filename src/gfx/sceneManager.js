@@ -1,6 +1,15 @@
 import * as THREE from 'three';
+import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
 import { RACERS } from '../shared/constants.js';
-import { getTrackSample, getTrackMeta, projectOnTrack, TRACK_LENGTH } from '../shared/trackData.js';
+import {
+  getTrackSample,
+  getTrackMeta,
+  projectOnTrack,
+  TRACK_LENGTH,
+  getBaseTrackId,
+  isArenaTrack,
+  ARENA_DATA,
+} from '../shared/trackData.js';
 import { buildTrackWorld } from './trackBuilder.js';
 import {
   createKartVisual,
@@ -10,6 +19,8 @@ import {
   KartVisualManager,
 } from './kartFactory.js';
 import { ItemVisualManager } from './itemVisuals.js';
+import { PostProcessingPipeline } from './postProcessing.js';
+import { PodiumAndPaddockStage } from './podiumAndPaddockStage.js';
 
 function wrap01(t) {
   const r = t % 1;
@@ -31,11 +42,20 @@ export class SceneManager {
     this.container = containerEl;
     this.elapsed = 0;
     this.showcaseRacerId = RACERS[0]?.id || 'red';
+    this.showcaseKartId = 'classic';
+    this.showcaseBoostColorId = 'flame';
     this.showcaseTrackId = 'coco';
     this.activeTrackId = null;
 
     const width = Math.max(1, containerEl?.clientWidth || window.innerWidth || 800);
     const height = Math.max(1, containerEl?.clientHeight || window.innerHeight || 600);
+    const initialPr = Math.min(window.devicePixelRatio || 1, 2);
+    this._isMobile =
+      typeof window !== 'undefined' &&
+      (Boolean(window.matchMedia?.('(pointer: coarse)')?.matches) ||
+        /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent || '') ||
+        Math.min(window.innerWidth || 1280, window.innerHeight || 720) < 768);
+    this._shadowFrameToggle = false;
 
     // 1. Scene & Atmosphere
     this.scene = new THREE.Scene();
@@ -48,17 +68,17 @@ export class SceneManager {
 
     // 3. Mobile-Optimized High-Perf WebGLRenderer
     this.renderer = new THREE.WebGLRenderer({
-      antialias: true,
+      antialias: !this._isMobile,
       powerPreference: 'high-performance',
       alpha: false,
     });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    this.renderer.setPixelRatio(initialPr);
     this.renderer.setSize(width, height);
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
     this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
     this.renderer.toneMappingExposure = 1.1;
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.type = this._isMobile ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
 
     const canvas = this.renderer.domElement;
     canvas.style.width = '100%';
@@ -68,6 +88,28 @@ export class SceneManager {
       containerEl.appendChild(canvas);
     }
 
+    // 3b. Studio PBR RoomEnvironment via PMREMGenerator
+    this._pmremGenerator = new THREE.PMREMGenerator(this.renderer);
+    this._pmremGenerator.compileEquirectangularShader();
+    const roomEnv = new RoomEnvironment();
+    this._envRenderTarget = this._pmremGenerator.fromScene(roomEnv, 0.04);
+    this.scene.environment = this._envRenderTarget.texture;
+    if (typeof this.scene.environmentIntensity === 'number') {
+      this.scene.environmentIntensity = 0.55;
+    }
+    roomEnv.dispose();
+    this._pmremGenerator.dispose();
+    this._pmremGenerator = null;
+
+    // 3c. Post-Processing Pipeline (HalfFloat MSAA + Bloom + SpeedFX + OutputPass)
+    this.postProcessing = new PostProcessingPipeline(this.renderer, {
+      width,
+      height,
+      pixelRatio: initialPr,
+      initialTier: 'auto',
+      onTierChange: (resolvedTier) => this._applyShadowQuality(resolvedTier),
+    });
+
     // 4. Dynamic Multi-Track Lighting
     this.hemiLight = new THREE.HemisphereLight(0x8be9ff, 0xffe28a, 1.1);
     this.scene.add(this.hemiLight);
@@ -76,7 +118,8 @@ export class SceneManager {
     this.sunLight = new THREE.DirectionalLight(0xfff5d6, 1.9);
     this.sunLight.position.copy(this.sunOffset);
     this.sunLight.castShadow = true;
-    this.sunLight.shadow.mapSize.set(1024, 1024);
+    const initialShadowSize = this._isMobile ? 512 : 1024;
+    this.sunLight.shadow.mapSize.set(initialShadowSize, initialShadowSize);
     this.sunLight.shadow.camera.near = 10;
     this.sunLight.shadow.camera.far = 165;
     const frustum = 38;
@@ -88,17 +131,23 @@ export class SceneManager {
     this.sunLight.shadow.normalBias = 0.035;
     this.scene.add(this.sunLight);
     this.scene.add(this.sunLight.target);
+    this._applyShadowQuality(this.postProcessing.getResolvedTier());
 
     this.rimLight = new THREE.DirectionalLight(0x56dcff, 0.42);
     this.rimLight.position.set(-50, 28, 45);
     this.scene.add(this.rimLight);
 
-    // 5. Managers & Showcase / Ghost Karts
+    // 5. Managers, Paddock/Podium Stage & Showcase / Ghost Karts
     this.trackWorld = null;
     this.itemManager = new ItemVisualManager(this.scene, 'coco');
     this.kartManager = new KartVisualManager(this.scene);
+    this.stage = new PodiumAndPaddockStage(this.scene);
 
-    this.showcaseKart = createKartVisual(this.showcaseRacerId, { showNameplate: false });
+    this.showcaseKart = createKartVisual(this.showcaseRacerId, {
+      showNameplate: false,
+      kartId: this.showcaseKartId,
+      boostColorId: this.showcaseBoostColorId,
+    });
     this.scene.add(this.showcaseKart.root);
 
     this.ghostKart = null;
@@ -107,10 +156,22 @@ export class SceneManager {
     this.heroSample = getTrackSample(0, 'coco');
     this._ensureTrackWorld('coco');
 
-    // Spring Chase Camera + Screen Shake + Photo-Finish state
+    // Spring Chase Camera + Screen Shake + Photo-Finish state + Pre-allocated scratch vectors
     this.camPos = new THREE.Vector3();
     this.camLook = new THREE.Vector3();
     this.renderCamPos = new THREE.Vector3();
+    this._tmpTargetPos = new THREE.Vector3();
+    this._tmpTargetLook = new THREE.Vector3();
+    this._fxParams = {
+      dt: 1 / 60,
+      elapsed: 0,
+      speedRatio: 0,
+      boosting: false,
+      starActive: false,
+      shrinking: false,
+      vignetteBase: 0,
+      trackId: 'coco',
+    };
     this.camYaw = this.heroSample.yaw;
     this.driftPeek = 0;
     this.cornerBlend = 0;
@@ -118,15 +179,29 @@ export class SceneManager {
     this.finishElapsed = 0;
     this.photoAnchor = new THREE.Vector3();
     this.photoAnchorSet = false;
+    this._inFinishOrbit = false;
     this.camInitialized = false;
     this.lastPhase = null;
+    this.menuViewMode = 'paddock'; // 'paddock' | 'track_preview'
+    this.userOrbitOffset = 0;
+    this.lastOrbitInteractAt = 0;
+    this.previewProgress = 0.08;
+    this.lastPreviewScrubAt = 0;
+    this._menuCamInitialized = false;
 
-    // Trauma-based camera shake tracking
+    // Trauma-based camera shake & event impulse tracking
     this.shakeTrauma = 0;
     this._seenExplosionIds = new Set();
+    this._nextExplosionIds = new Set();
     this._prevSpinTimer = 0;
     this._prevShrinkTimer = 0;
     this._prevBoostTimer = 0;
+    this._lastEventFxAt = {
+      boost: -99,
+      hit: -99,
+      explosion: -99,
+      lightning: -99,
+    };
 
     // Responsive Resize handling
     this._onResize = () => this._handleResize();
@@ -143,14 +218,50 @@ export class SceneManager {
     if (!this.renderer) return;
     const width = Math.max(1, this.container?.clientWidth || window.innerWidth || 800);
     const height = Math.max(1, this.container?.clientHeight || window.innerHeight || 600);
+    const pr = Math.min(window.devicePixelRatio || 1, 2);
     this.camera.aspect = width / height;
     this.camera.updateProjectionMatrix();
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-    this.renderer.setSize(width, height);
+    if (this.postProcessing) {
+      this.postProcessing.setSize(width, height, pr);
+    } else {
+      this.renderer.setPixelRatio(pr);
+      this.renderer.setSize(width, height);
+    }
+  }
+
+  _applyShadowQuality(resolvedTier = 'balanced') {
+    if (!this.renderer || !this.sunLight) return;
+
+    if (resolvedTier === 'low') {
+      this.renderer.shadowMap.enabled = false;
+      this.renderer.shadowMap.autoUpdate = false;
+      this.sunLight.castShadow = false;
+      this.renderer.shadowMap.needsUpdate = true;
+      return;
+    }
+
+    const isMobileBalanced = this._isMobile && resolvedTier === 'balanced';
+    const targetShadowType = isMobileBalanced ? THREE.PCFShadowMap : THREE.PCFSoftShadowMap;
+    const targetSize = isMobileBalanced ? 512 : 1024;
+
+    this.renderer.shadowMap.enabled = true;
+    this.renderer.shadowMap.type = targetShadowType;
+    this.renderer.shadowMap.autoUpdate = !isMobileBalanced;
+    this.sunLight.castShadow = true;
+
+    if (this.sunLight.shadow.mapSize.x !== targetSize || this.sunLight.shadow.mapSize.y !== targetSize) {
+      this.sunLight.shadow.mapSize.set(targetSize, targetSize);
+      if (this.sunLight.shadow.map) {
+        this.sunLight.shadow.map.dispose();
+        this.sunLight.shadow.map = null;
+      }
+    }
+    this.renderer.shadowMap.needsUpdate = true;
   }
 
   _applyTrackAtmosphere(trackId) {
-    if (trackId === 'neon') {
+    const baseId = getBaseTrackId(trackId);
+    if (baseId === 'neon') {
       this.scene.background.setHex(0x060318);
       this.scene.fog.color.setHex(0x160836);
       this.scene.fog.density = 0.00125;
@@ -162,7 +273,55 @@ export class SceneManager {
       this.rimLight.color.setHex(0xf72585);
       this.rimLight.intensity = 0.72;
       this.renderer.toneMappingExposure = 1.18;
-    } else if (trackId === 'rainbow') {
+    } else if (baseId === 'polar') {
+      this.scene.background.setHex(0x0c3559);
+      this.scene.fog.color.setHex(0x38bdf8);
+      this.scene.fog.density = 0.0011;
+      this.hemiLight.color.setHex(0xbae6fd);
+      this.hemiLight.groundColor.setHex(0xe0f2fe);
+      this.hemiLight.intensity = 1.15;
+      this.sunLight.color.setHex(0xf0f9ff);
+      this.sunLight.intensity = 1.7;
+      this.rimLight.color.setHex(0x22d3ee);
+      this.rimLight.intensity = 0.55;
+      this.renderer.toneMappingExposure = 1.12;
+    } else if (baseId === 'pinball') {
+      this.scene.background.setHex(0x120329);
+      this.scene.fog.color.setHex(0x2d0c59);
+      this.scene.fog.density = 0.001;
+      this.hemiLight.color.setHex(0xc084fc);
+      this.hemiLight.groundColor.setHex(0xfacc15);
+      this.hemiLight.intensity = 1.05;
+      this.sunLight.color.setHex(0xfef08a);
+      this.sunLight.intensity = 1.65;
+      this.rimLight.color.setHex(0xf43f5e);
+      this.rimLight.intensity = 0.75;
+      this.renderer.toneMappingExposure = 1.16;
+    } else if (baseId === 'volcano') {
+      this.scene.background.setHex(0x1a0605);
+      this.scene.fog.color.setHex(0x7c2d12);
+      this.scene.fog.density = 0.0012;
+      this.hemiLight.color.setHex(0xfb923c);
+      this.hemiLight.groundColor.setHex(0xef4444);
+      this.hemiLight.intensity = 0.95;
+      this.sunLight.color.setHex(0xffedd5);
+      this.sunLight.intensity = 1.55;
+      this.rimLight.color.setHex(0xf97316);
+      this.rimLight.intensity = 0.85;
+      this.renderer.toneMappingExposure = 1.14;
+    } else if (baseId === 'arena') {
+      this.scene.background.setHex(0x09051c);
+      this.scene.fog.color.setHex(0x1e1b4b);
+      this.scene.fog.density = 0.0009;
+      this.hemiLight.color.setHex(0x93c5fd);
+      this.hemiLight.groundColor.setHex(0xf43f5e);
+      this.hemiLight.intensity = 1.15;
+      this.sunLight.color.setHex(0xffffff);
+      this.sunLight.intensity = 1.75;
+      this.rimLight.color.setHex(0x00f5d4);
+      this.rimLight.intensity = 0.65;
+      this.renderer.toneMappingExposure = 1.16;
+    } else if (baseId === 'rainbow') {
       this.scene.background.setHex(0x050216);
       this.scene.fog.color.setHex(0x1b0b42);
       this.scene.fog.density = 0.00075;
@@ -204,10 +363,14 @@ export class SceneManager {
     this.trackWorld = buildTrackWorld(this.scene, validId);
     this.itemManager.rebuildForTrack(validId);
 
-    const meta = typeof getTrackMeta === 'function' ? getTrackMeta(validId) : null;
-    const trackLen = meta?.length || TRACK_LENGTH || 600;
-    const heroT = 1 - 5.2 / trackLen;
-    this.heroSample = getTrackSample(heroT, validId);
+    if (isArenaTrack(validId)) {
+      this.heroSample = { x: 0, y: ARENA_DATA.floorY ?? 0.6, z: 14, yaw: 0 };
+    } else {
+      const meta = typeof getTrackMeta === 'function' ? getTrackMeta(validId) : null;
+      const trackLen = meta?.length || TRACK_LENGTH || 600;
+      const heroT = 1 - 5.2 / trackLen;
+      this.heroSample = getTrackSample(heroT, validId);
+    }
 
     if (this.showcaseKart) {
       this.showcaseKart.root.position.set(
@@ -221,11 +384,17 @@ export class SceneManager {
     this.camInitialized = false;
   }
 
-  setShowcaseRacer(racerId) {
-    if (!racerId) return;
-    this.showcaseRacerId = racerId;
+  setShowcaseRacer(racerId, kartId = undefined, boostColorId = undefined) {
+    if (racerId) this.showcaseRacerId = racerId;
+    if (kartId) this.showcaseKartId = kartId;
+    if (boostColorId) this.showcaseBoostColorId = boostColorId;
     if (this.showcaseKart) {
-      setKartRacerTheme(this.showcaseKart, racerId);
+      setKartRacerTheme(
+        this.showcaseKart,
+        this.showcaseRacerId,
+        this.showcaseKartId,
+        this.showcaseBoostColorId
+      );
       this.showcaseKart.squashAmp = 0.16;
       this.showcaseKart.squashPhase = 0;
     }
@@ -233,10 +402,37 @@ export class SceneManager {
 
   setShowcaseTrack(trackId) {
     if (!trackId) return;
+    const changed = this.showcaseTrackId !== trackId;
     this.showcaseTrackId = trackId;
+    if (changed && this.menuViewMode === 'track_preview') {
+      this.previewProgress = 0.08;
+      this.lastPreviewScrubAt = 0;
+    }
     if (!this.lastPhase || this.lastPhase === 'home' || this.lastPhase === 'lobby') {
       this._ensureTrackWorld(trackId);
     }
+  }
+
+  setMenuViewMode(mode) {
+    const nextMode = mode === 'track_preview' ? 'track_preview' : 'paddock';
+    if (this.menuViewMode === nextMode) return;
+    this.menuViewMode = nextMode;
+    if (nextMode === 'track_preview') {
+      this.previewProgress = 0.08;
+      this.lastPreviewScrubAt = 0;
+    }
+  }
+
+  addShowcaseOrbitDelta(deltaRad) {
+    if (!Number.isFinite(deltaRad)) return;
+    this.userOrbitOffset = Math.max(-2.6, Math.min(2.6, this.userOrbitOffset + deltaRad));
+    this.lastOrbitInteractAt = performance.now();
+  }
+
+  addPreviewScrub(deltaT) {
+    if (!Number.isFinite(deltaT)) return;
+    this.previewProgress = (((this.previewProgress + deltaT) % 1) + 1) % 1;
+    this.lastPreviewScrubAt = performance.now();
   }
 
   setGhostState(ghostPoseOrNull) {
@@ -265,7 +461,128 @@ export class SceneManager {
     this.shakeTrauma = Math.min(1.0, this.shakeTrauma + Math.max(0, intensity));
   }
 
+  setQualityTier(tier) {
+    if (!this.postProcessing) return 'auto';
+    return this.postProcessing.setQualityTier(tier);
+  }
+
+  getQualityTier() {
+    if (!this.postProcessing) return 'auto';
+    return this.postProcessing.getQualityTier();
+  }
+
+  handleEvent(ev, raceState = null, localId = null) {
+    if (!ev) return;
+    const rawType =
+      typeof ev === 'string'
+        ? ev
+        : ev.type || ev.kind || ev.name || ev.event || '';
+    const type = String(rawType).toLowerCase();
+    if (!type) return;
+
+    const effectiveLocalId = localId ?? raceState?.localId ?? null;
+    const actorId = ev.targetId ?? ev.kartId ?? ev.playerId ?? ev.ownerId ?? ev.id ?? null;
+    const isLocal = !actorId || !effectiveLocalId || actorId === effectiveLocalId;
+
+    switch (type) {
+      case 'rocket_start':
+        if (isLocal) {
+          this.postProcessing?.triggerFlash('rocket_start', 1.15);
+          this.triggerShake(0.42);
+          this._lastEventFxAt.boost = this.elapsed;
+        }
+        break;
+
+      case 'rocket_fail':
+        if (isLocal) {
+          this.postProcessing?.triggerFlash('hit', 0.45);
+          this.triggerShake(0.35);
+          this._lastEventFxAt.hit = this.elapsed;
+        }
+        break;
+
+      case 'boost':
+      case 'turbo':
+        if (isLocal) {
+          const isDraft = ev.source === 'draft';
+          this.postProcessing?.triggerFlash('boost', isDraft ? 0.55 : 0.9);
+          this.triggerShake(isDraft ? 0.14 : 0.28);
+          this._lastEventFxAt.boost = this.elapsed;
+        }
+        break;
+
+      case 'star':
+        if (isLocal) {
+          this.postProcessing?.triggerFlash('star', 1.0);
+          this.triggerShake(0.24);
+          this._lastEventFxAt.boost = this.elapsed;
+        }
+        break;
+
+      case 'stunt':
+        if (isLocal) {
+          this.postProcessing?.triggerFlash('stunt', 0.85);
+          this.triggerShake(0.22);
+        }
+        break;
+
+      case 'shield_block':
+        if (isLocal) {
+          this.postProcessing?.triggerFlash('shield_block', 0.75);
+          this.triggerShake(0.26);
+        }
+        break;
+
+      case 'hit':
+        if (isLocal || (ev.targetId && ev.targetId === effectiveLocalId)) {
+          this.postProcessing?.triggerFlash('hit', 1.0);
+          this.triggerShake(0.68);
+          this._lastEventFxAt.hit = this.elapsed;
+        }
+        break;
+
+      case 'fall':
+        if (isLocal) {
+          this.postProcessing?.triggerFlash('hit', 0.5);
+          this.triggerShake(0.38);
+        }
+        break;
+
+      case 'lightning':
+        this.postProcessing?.triggerFlash('lightning', 1.1);
+        this.triggerShake(0.55);
+        this._lastEventFxAt.lightning = this.elapsed;
+        break;
+
+      case 'explosion': {
+        let intensity = isLocal ? 0.95 : 0.55;
+        if (ev.x != null && ev.z != null && Array.isArray(raceState?.karts)) {
+          const focusKart =
+            raceState.karts.find((k) => k.id === effectiveLocalId) || raceState.karts[0];
+          if (focusKart) {
+            const dist = Math.hypot((ev.x || 0) - focusKart.x, (ev.z || 0) - focusKart.z);
+            if (dist >= 45) break;
+            intensity = Math.max(0.28, (1 - dist / 45) * 1.05);
+          }
+        }
+        this.postProcessing?.triggerFlash('explosion', intensity);
+        this.triggerShake(intensity * 0.9);
+        this._lastEventFxAt.explosion = this.elapsed;
+        break;
+      }
+
+      default:
+        break;
+    }
+  }
+
   _updateShadowCenter(focusX, focusY, focusZ) {
+    if (!this.renderer?.shadowMap?.enabled || !this.sunLight?.castShadow) return;
+    if (!this.renderer.shadowMap.autoUpdate) {
+      this._shadowFrameToggle = !this._shadowFrameToggle;
+      if (!this._shadowFrameToggle) return;
+      this.renderer.shadowMap.needsUpdate = true;
+    }
     const sx = Math.round(focusX * 0.5) * 2;
     const sy = Math.round(focusY * 0.5) * 2;
     const sz = Math.round(focusZ * 0.5) * 2;
@@ -292,42 +609,76 @@ export class SceneManager {
   _detectCameraShakeEvents(raceState, focusKart) {
     if (!raceState || !focusKart) return;
 
-    // 1. Nearby Blue-Shell explosions
+    // 1. Nearby Blue-Shell explosions (zero-allocation Set swap)
     const explosions = raceState.explosions || [];
-    const currentExpIds = new Set();
+    this._nextExplosionIds.clear();
     for (let i = 0; i < explosions.length; i++) {
       const exp = explosions[i];
       if (!exp || exp.id == null) continue;
-      currentExpIds.add(exp.id);
+      this._nextExplosionIds.add(exp.id);
       if (!this._seenExplosionIds.has(exp.id)) {
         const dist = Math.hypot((exp.x || 0) - focusKart.x, (exp.z || 0) - focusKart.z);
-        if (dist < 45) {
-          this.triggerShake(Math.max(0.28, (1 - dist / 45) * 0.95));
+        if (dist < 45 && this.elapsed - this._lastEventFxAt.explosion > 0.25) {
+          const intensity = Math.max(0.28, (1 - dist / 45) * 0.95);
+          this.triggerShake(intensity);
+          this.postProcessing?.triggerFlash('explosion', intensity);
         }
       }
     }
-    this._seenExplosionIds = currentExpIds;
+    const prevSet = this._seenExplosionIds;
+    this._seenExplosionIds = this._nextExplosionIds;
+    this._nextExplosionIds = prevSet;
 
     // 2. Hit / Spinout impact
     const spin = focusKart.spinoutTimer || 0;
-    if (spin > this._prevSpinTimer + 0.15) {
+    if (spin > this._prevSpinTimer + 0.15 && this.elapsed - this._lastEventFxAt.hit > 0.25) {
       this.triggerShake(0.68);
+      this.postProcessing?.triggerFlash('hit', 0.9);
     }
     this._prevSpinTimer = spin;
 
     // 3. Lightning strike
     const shrink = focusKart.shrinkTimer || 0;
-    if (shrink > this._prevShrinkTimer + 0.5) {
+    if (shrink > this._prevShrinkTimer + 0.5 && this.elapsed - this._lastEventFxAt.lightning > 0.25) {
       this.triggerShake(0.55);
+      this.postProcessing?.triggerFlash('lightning', 0.95);
     }
     this._prevShrinkTimer = shrink;
 
     // 4. Rocket Start / Boost burst
     const boost = focusKart.boostTimer || 0;
-    if (boost > this._prevBoostTimer + 0.25) {
+    if (boost > this._prevBoostTimer + 0.25 && this.elapsed - this._lastEventFxAt.boost > 0.25) {
       this.triggerShake(0.28);
+      this.postProcessing?.triggerFlash('boost', 0.75);
     }
     this._prevBoostTimer = boost;
+  }
+
+  _renderFrame(dt, trackId, focusKart, isPaddock) {
+    const fx = this._fxParams;
+    fx.dt = dt;
+    fx.elapsed = this.elapsed;
+    fx.trackId = trackId;
+
+    if (focusKart && !isPaddock) {
+      fx.speedRatio = Math.min(1.4, Math.abs(focusKart.speed || 0) / 42);
+      fx.boosting = (focusKart.boostTimer || 0) > 0;
+      fx.starActive = (focusKart.starTimer || 0) > 0;
+      fx.shrinking = (focusKart.shrinkTimer || 0) > 0;
+      fx.vignetteBase = fx.boosting ? 0.22 : 0.0;
+    } else {
+      fx.speedRatio = 0;
+      fx.boosting = false;
+      fx.starActive = false;
+      fx.shrinking = false;
+      fx.vignetteBase = isPaddock ? 0.08 : 0.0;
+    }
+
+    if (this.postProcessing) {
+      this.postProcessing.render(this.scene, this.camera, fx);
+    } else {
+      this.renderer.render(this.scene, this.camera);
+    }
   }
 
   update(raceState, localId, dt = 1 / 60) {
@@ -346,8 +697,13 @@ export class SceneManager {
     this.trackWorld.update(safeDt, this.elapsed);
     this.itemManager.update(raceState, safeDt, this.elapsed);
 
-    // 2. Update Holographic Ghost Kart if active
-    if (this.ghostPose && this.ghostKart && (phase === 'countdown' || phase === 'racing' || phase === 'finished')) {
+    // 2. Update Holographic Ghost Kart if active (not in Arena)
+    if (
+      !isArenaTrack(desiredTrackId) &&
+      this.ghostPose &&
+      this.ghostKart &&
+      (phase === 'countdown' || phase === 'racing')
+    ) {
       const rawName = this.ghostPose.name || 'Fantôme';
       const label = rawName.startsWith('👻') ? rawName : `👻 ${rawName}`;
       this.ghostKart.root.visible = true;
@@ -377,46 +733,153 @@ export class SceneManager {
       this.shakeTrauma = 0;
       this.finishElapsed = 0;
       this.photoAnchorSet = false;
+      this._inFinishOrbit = false;
 
       if (!raceState) {
         this.kartManager.setVisible(false);
-        this.showcaseKart.root.visible = true;
 
-        updateKartVisual(
-          this.showcaseKart,
-          {
-            racerId: this.showcaseRacerId,
-            x: this.heroSample.x,
-            y: this.heroSample.y,
-            z: this.heroSample.z,
-            yaw: this.heroSample.yaw,
-            speed: 0,
-            steer: Math.sin(this.elapsed * 1.4) * 0.45,
-          },
-          safeDt,
-          this.elapsed,
-          true,
-          desiredTrackId
-        );
+        if (this.menuViewMode === 'track_preview') {
+          if (typeof this.scene.environmentIntensity === 'number') {
+            this.scene.environmentIntensity = 0.48;
+          }
+          this.stage.update({
+            mode: 'hidden',
+            trackId: desiredTrackId,
+            heroSample: this.heroSample,
+            dt: safeDt,
+            elapsed: this.elapsed,
+          });
+          this.showcaseKart.root.visible = false;
 
-        const orbitAngle =
-          this.heroSample.yaw + Math.PI + Math.sin(this.elapsed * 0.38) * 1.05 + 0.38;
-        const radius = this.camera.aspect < 0.85 ? 6.6 : 5.3;
-        this.camPos.set(
-          this.heroSample.x + Math.sin(orbitAngle) * radius,
-          this.heroSample.y + 2.05 + Math.sin(this.elapsed * 0.55) * 0.28,
-          this.heroSample.z + Math.cos(orbitAngle) * radius
-        );
-        this.camLook.set(
-          this.heroSample.x,
-          this.heroSample.y + 1.15,
-          this.heroSample.z + Math.cos(this.heroSample.yaw) * 1.4
-        );
+          const now = performance.now();
+          const targetPos = this._tmpTargetPos;
+          const targetLook = this._tmpTargetLook;
 
-        this.camera.position.copy(this.camPos);
-        this.camera.lookAt(this.camLook);
-        this._updateShadowCenter(this.heroSample.x, this.heroSample.y, this.heroSample.z);
+          if (isArenaTrack(desiredTrackId)) {
+            if (now - this.lastPreviewScrubAt > 1800) {
+              this.previewProgress = (this.previewProgress + safeDt * 0.028) % 1;
+            }
+            const angle = this.previewProgress * Math.PI * 2;
+            const radius = this.camera.aspect < 0.85 ? 46 : 38;
+            targetPos.set(
+              Math.sin(angle) * radius,
+              20 + Math.sin(this.elapsed * 0.5) * 1.5,
+              Math.cos(angle) * radius
+            );
+            targetLook.set(Math.sin(angle + 0.5) * 8, 1.5, Math.cos(angle + 0.5) * 8);
+            this._updateShadowCenter(0, 0, 0);
+          } else {
+            if (now - this.lastPreviewScrubAt > 1800) {
+              this.previewProgress = (this.previewProgress + safeDt * 0.022) % 1;
+            }
+            const flySample = getTrackSample(this.previewProgress, desiredTrackId);
+            const lookAheadSample = getTrackSample(
+              (this.previewProgress + 0.055) % 1,
+              desiredTrackId
+            );
+            const sideAngle = flySample.yaw + Math.PI * 0.5;
+            const sway = Math.sin(this.elapsed * 0.45) * 4.2;
+            const backDist = this.camera.aspect < 0.85 ? 19 : 16;
+            const height = this.camera.aspect < 0.85 ? 12.5 : 10.5;
+            targetPos.set(
+              flySample.x - Math.sin(flySample.yaw) * backDist + Math.sin(sideAngle) * sway,
+              flySample.y + height,
+              flySample.z - Math.cos(flySample.yaw) * backDist + Math.cos(sideAngle) * sway
+            );
+            targetLook.set(lookAheadSample.x, lookAheadSample.y + 1.8, lookAheadSample.z);
+            this._updateShadowCenter(lookAheadSample.x, lookAheadSample.y, lookAheadSample.z);
+          }
+
+          if (!this._menuCamInitialized) {
+            this.camPos.copy(targetPos);
+            this.camLook.copy(targetLook);
+            this._menuCamInitialized = true;
+          } else {
+            const smooth = 1 - Math.exp(-4.2 * safeDt);
+            this.camPos.lerp(targetPos, smooth);
+            this.camLook.lerp(targetLook, smooth);
+          }
+          this.camera.position.copy(this.camPos);
+          this.camera.lookAt(this.camLook);
+        } else {
+          // Paddock / Showroom stage
+          if (typeof this.scene.environmentIntensity === 'number') {
+            this.scene.environmentIntensity = 0.78;
+          }
+          this.stage.update({
+            mode: 'paddock',
+            trackId: desiredTrackId,
+            heroSample: this.heroSample,
+            dt: safeDt,
+            elapsed: this.elapsed,
+          });
+          this.showcaseKart.root.visible = true;
+
+          updateKartVisual(
+            this.showcaseKart,
+            {
+              racerId: this.showcaseRacerId,
+              kartId: this.showcaseKartId,
+              boostColorId: this.showcaseBoostColorId,
+              x: this.heroSample.x,
+              y: this.heroSample.y + this.stage.getPaddockKartYOffset(),
+              z: this.heroSample.z,
+              yaw: this.heroSample.yaw,
+              speed: 0,
+              steer: Math.sin(this.elapsed * 1.4) * 0.45,
+            },
+            safeDt,
+            this.elapsed,
+            true,
+            desiredTrackId
+          );
+
+          const now = performance.now();
+          if (now - this.lastOrbitInteractAt > 2400) {
+            this.userOrbitOffset *= Math.exp(-1.5 * safeDt);
+          }
+          const autoOrbit = Math.sin(this.elapsed * 0.34) * 0.65 + 0.42;
+          const orbitAngle = this.heroSample.yaw + Math.PI + autoOrbit + this.userOrbitOffset;
+          const isPortraitCam = this.camera.aspect < 0.85;
+          const radius = isPortraitCam ? 6.2 : 5.1;
+          const camHeight = isPortraitCam ? 2.35 : 2.05;
+          const lookY = isPortraitCam ? 0.48 : 0.98;
+          const targetPos = this._tmpTargetPos.set(
+            this.heroSample.x + Math.sin(orbitAngle) * radius,
+            this.heroSample.y + camHeight + Math.sin(this.elapsed * 0.55) * 0.22,
+            this.heroSample.z + Math.cos(orbitAngle) * radius
+          );
+          const targetLook = this._tmpTargetLook.set(
+            this.heroSample.x,
+            this.heroSample.y + lookY,
+            this.heroSample.z + Math.cos(this.heroSample.yaw) * 1.15
+          );
+
+          if (!this._menuCamInitialized) {
+            this.camPos.copy(targetPos);
+            this.camLook.copy(targetLook);
+            this._menuCamInitialized = true;
+          } else {
+            const smooth = 1 - Math.exp(-5.0 * safeDt);
+            this.camPos.lerp(targetPos, smooth);
+            this.camLook.lerp(targetLook, smooth);
+          }
+
+          this.camera.position.copy(this.camPos);
+          this.camera.lookAt(this.camLook);
+          this._updateShadowCenter(this.heroSample.x, this.heroSample.y, this.heroSample.z);
+        }
       } else {
+        if (typeof this.scene.environmentIntensity === 'number') {
+          this.scene.environmentIntensity = 0.52;
+        }
+        this.stage.update({
+          mode: 'hidden',
+          trackId: desiredTrackId,
+          heroSample: this.heroSample,
+          dt: safeDt,
+          elapsed: this.elapsed,
+        });
         this.showcaseKart.root.visible = false;
         this.kartManager.sync(
           raceState.karts,
@@ -426,18 +889,21 @@ export class SceneManager {
           desiredTrackId
         );
 
-        const meta = typeof getTrackMeta === 'function' ? getTrackMeta(desiredTrackId) : null;
-        const trackLen = meta?.length || TRACK_LENGTH || 600;
-        const gridT = 1 - 11.5 / trackLen;
-        const gridSample = getTrackSample(gridT, desiredTrackId);
+        let gridSample = this.heroSample;
+        if (!isArenaTrack(desiredTrackId)) {
+          const meta = typeof getTrackMeta === 'function' ? getTrackMeta(desiredTrackId) : null;
+          const trackLen = meta?.length || TRACK_LENGTH || 600;
+          const gridT = 1 - 11.5 / trackLen;
+          gridSample = getTrackSample(gridT, desiredTrackId);
+        }
         const orbitAngle = gridSample.yaw + Math.PI + Math.sin(this.elapsed * 0.32) * 0.78;
         const radius = this.camera.aspect < 0.85 ? 13.5 : 10.8;
-        const targetPos = new THREE.Vector3(
+        const targetPos = this._tmpTargetPos.set(
           gridSample.x + Math.sin(orbitAngle) * radius,
           gridSample.y + 4.4,
           gridSample.z + Math.cos(orbitAngle) * radius
         );
-        const targetLook = new THREE.Vector3(
+        const targetLook = this._tmpTargetLook.set(
           this.heroSample.x,
           this.heroSample.y + 1.4,
           this.heroSample.z
@@ -453,12 +919,70 @@ export class SceneManager {
 
       this.camInitialized = false;
       this.lastPhase = phase;
-      this.renderer.render(this.scene, this.camera);
+      this._renderFrame(safeDt, desiredTrackId, null, !raceState && this.menuViewMode !== 'track_preview');
       return;
     }
 
     // 4. Race Phases ('countdown' | 'racing' | 'finished')
+    if (typeof this.scene.environmentIntensity === 'number') {
+      this.scene.environmentIntensity = phase === 'finished' ? 0.68 : 0.48;
+    }
+    this._menuCamInitialized = false;
     this.showcaseKart.root.visible = false;
+
+    if (phase === 'finished') {
+      const stagedKarts = this.stage.update({
+        mode: 'podium',
+        trackId: desiredTrackId,
+        heroSample: this.heroSample,
+        karts: raceState.karts,
+        dt: safeDt,
+        elapsed: this.elapsed,
+      });
+      this.kartManager.sync(
+        stagedKarts || raceState.karts,
+        effectiveLocalId,
+        safeDt,
+        this.elapsed,
+        desiredTrackId
+      );
+
+      this.shakeTrauma = Math.max(0, this.shakeTrauma - safeDt * 2.5);
+      this._setSmoothFov(52, safeDt);
+      this.stage.getPodiumCameraTarget(
+        this.camera.aspect,
+        this.elapsed,
+        this._tmpTargetPos,
+        this._tmpTargetLook
+      );
+
+      if (!this.camInitialized) {
+        this.camPos.copy(this._tmpTargetPos);
+        this.camLook.copy(this._tmpTargetLook);
+        this.camInitialized = true;
+      } else {
+        const alpha = 1 - Math.exp(-4.5 * safeDt);
+        this.camPos.lerp(this._tmpTargetPos, alpha);
+        this.camLook.lerp(this._tmpTargetLook, alpha);
+      }
+
+      this.camera.position.copy(this.camPos);
+      this.camera.lookAt(this.camLook);
+      this._updateShadowCenter(this.heroSample.x, this.heroSample.y, this.heroSample.z);
+
+      this.lastPhase = phase;
+      this._renderFrame(safeDt, desiredTrackId, null, false);
+      return;
+    }
+
+    // Countdown & Racing: ensure Podium is hidden
+    this.stage.update({
+      mode: 'hidden',
+      trackId: desiredTrackId,
+      heroSample: this.heroSample,
+      dt: safeDt,
+      elapsed: this.elapsed,
+    });
     this.kartManager.sync(
       raceState.karts,
       effectiveLocalId,
@@ -471,10 +995,10 @@ export class SceneManager {
     const focusKart = karts.find((k) => k.id === effectiveLocalId) || karts[0];
 
     if (focusKart) {
-      const kx = focusKart.x || 0;
-      const ky = focusKart.y || 0;
-      const kz = focusKart.z || 0;
-      const kyaw = focusKart.yaw || 0;
+      const kx = Number.isFinite(focusKart.x) ? focusKart.x : 0;
+      const ky = Number.isFinite(focusKart.y) ? focusKart.y : 0;
+      const kz = Number.isFinite(focusKart.z) ? focusKart.z : 0;
+      const kyaw = Number.isFinite(focusKart.yaw) ? focusKart.yaw : 0;
 
       if (!this.camInitialized || (this.lastPhase === 'lobby' && phase === 'countdown')) {
         this.camYaw = kyaw;
@@ -482,6 +1006,7 @@ export class SceneManager {
         this.cornerBlend = 0;
         this.finishElapsed = 0;
         this.photoAnchorSet = false;
+        this._inFinishOrbit = false;
         this._prevSpinTimer = 0;
         this._prevShrinkTimer = 0;
         this._prevBoostTimer = 0;
@@ -498,13 +1023,14 @@ export class SceneManager {
       this._detectCameraShakeEvents(raceState, focusKart);
       this.shakeTrauma = Math.max(0, this.shakeTrauma - safeDt * 2.2);
 
-      const kartFinished = Boolean(focusKart.finished) || phase === 'finished';
+      const kartFinished = Boolean(focusKart.finished);
 
       if (kartFinished) {
         this.finishElapsed += safeDt;
 
         if (!this.photoAnchorSet) {
           this.photoAnchorSet = true;
+          this._inFinishOrbit = false;
           const fx = Math.sin(kyaw);
           const fz = Math.cos(kyaw);
           const rx = -fz;
@@ -518,38 +1044,54 @@ export class SceneManager {
           this.finishOrbitAngle = kyaw + 0.55;
         }
 
-        if (this.finishElapsed < 1.55) {
+        const usePhotoHeroShot =
+          Math.abs(focusKart.speed || 0) > 1.0 &&
+          this.finishElapsed < 1.15;
+
+        if (usePhotoHeroShot) {
           // PHOTO-FINISH HERO SHOT watching the kart blast across the line!
+          this._inFinishOrbit = false;
           this._setSmoothFov(54, safeDt);
           const alpha = 1 - Math.exp(-9.0 * safeDt);
           this.camPos.lerp(this.photoAnchor, alpha);
-          this.camLook.lerp(new THREE.Vector3(kx, ky + 0.85, kz), 1 - Math.exp(-16 * safeDt));
+          this._tmpTargetLook.set(kx, ky + 0.85, kz);
+          this.camLook.lerp(this._tmpTargetLook, 1 - Math.exp(-16 * safeDt));
         } else {
-          // Smoothly transition into sweeping 360° Podium Orbit!
+          // Smoothly transition into sweeping 360° Finish Orbit without any camera snap!
+          if (!this._inFinishOrbit) {
+            this._inFinishOrbit = true;
+            const dxCam = this.camPos.x - kx;
+            const dzCam = this.camPos.z - kz;
+            if (Math.hypot(dxCam, dzCam) > 0.25) {
+              this.finishOrbitAngle = Math.atan2(dxCam, dzCam);
+            }
+          }
           this._setSmoothFov(58, safeDt);
           this.finishOrbitAngle += safeDt * 0.78;
           const orbitDist = this.camera.aspect < 0.85 ? 6.6 : 5.4;
-          const desiredPos = new THREE.Vector3(
+          this._tmpTargetPos.set(
             kx + Math.sin(this.finishOrbitAngle) * orbitDist,
             ky + 2.25 + Math.sin(this.elapsed * 1.2) * 0.2,
             kz + Math.cos(this.finishOrbitAngle) * orbitDist
           );
-          const desiredLook = new THREE.Vector3(kx, ky + 0.95, kz);
+          this._tmpTargetLook.set(kx, ky + 0.95, kz);
 
           const alpha = 1 - Math.exp(-5.5 * safeDt);
-          this.camPos.lerp(desiredPos, alpha);
-          this.camLook.lerp(desiredLook, alpha);
+          this.camPos.lerp(this._tmpTargetPos, alpha);
+          this.camLook.lerp(this._tmpTargetLook, alpha);
         }
       } else {
         this.finishElapsed = 0;
         this.photoAnchorSet = false;
+        this._inFinishOrbit = false;
 
         // MARIO-KART SPRING CHASE CAMERA WITH V3 CORNER LOOK-AHEAD ('countdown' & 'racing')
         const isBoosting = (focusKart.boostTimer || 0) > 0 || (focusKart.starTimer || 0) > 0;
         this._setSmoothFov(isBoosting ? 74 : 62, safeDt);
 
+        const arenaMode = isArenaTrack(desiredTrackId);
         const proj =
-          typeof projectOnTrack === 'function'
+          !arenaMode && typeof projectOnTrack === 'function'
             ? projectOnTrack(kx, kz, desiredTrackId)
             : null;
         const lookAheadSample = proj
@@ -591,6 +1133,7 @@ export class SceneManager {
         let chaseDist = isPortrait ? 7.35 : 6.15;
         let chaseHeight = isPortrait ? 3.2 : 2.72;
 
+        const fallTimer = focusKart.fallTimer || 0;
         let countdownSideOffset = 0;
         if (phase === 'countdown') {
           const cd = Math.max(0, Math.min(3, raceState.countdown || 0));
@@ -598,11 +1141,21 @@ export class SceneManager {
           countdownSideOffset = sweep * 2.4;
           chaseHeight += sweep * 0.75;
           chaseDist += sweep * 0.9;
+        } else if (fallTimer > 0.75) {
+          // Watch kart plunge into ditch from safely above the road edge
+          chaseDist += 2.4;
+          chaseHeight += 3.2;
+        } else if (fallTimer > 0) {
+          // Frame both kart and Cloud Fisherman during hoist
+          chaseDist += 1.7;
+          chaseHeight += 2.25;
         }
 
         const desiredCamX =
           kx - fx * chaseDist + rx * (-this.driftPeek * 0.35 + countdownSideOffset);
-        const desiredCamY = ky + chaseHeight;
+        const rawCamY = ky + chaseHeight;
+        const desiredCamY =
+          fallTimer > 0.75 ? Math.max(rawCamY, this.camPos.y - 1.2 * safeDt) : rawCamY;
         const desiredCamZ =
           kz - fz * chaseDist + rz * (-this.driftPeek * 0.35 + countdownSideOffset);
 
@@ -610,7 +1163,7 @@ export class SceneManager {
         let lookDirX = fx;
         let lookDirZ = fz;
         let elevPeek = 0;
-        if (lookAheadSample && this.cornerBlend > 0.001) {
+        if (lookAheadSample && this.cornerBlend > 0.001 && fallTimer <= 0) {
           const dx = lookAheadSample.x - kx;
           const dz = lookAheadSample.z - kz;
           const dLen = Math.hypot(dx, dz) || 1;
@@ -625,9 +1178,12 @@ export class SceneManager {
           elevPeek = THREE.MathUtils.clamp((lookAheadSample.y - ky) * 0.22, -0.6, 0.8) * this.cornerBlend;
         }
 
-        const lookAhead = 4.1;
+        const lookAhead = fallTimer > 0 ? 1.2 : 4.1;
         const desiredLookX = kx + lookDirX * lookAhead + rx * (this.driftPeek * 0.95);
-        const desiredLookY = ky + 1.05 + (focusKart.hopOffset || 0) * 0.35 + elevPeek;
+        const desiredLookY =
+          fallTimer > 0
+            ? ky + (fallTimer <= 0.75 ? 1.85 : 0.75)
+            : ky + 1.05 + (focusKart.hopOffset || 0) * 0.35 + elevPeek;
         const desiredLookZ = kz + lookDirZ * lookAhead + rz * (this.driftPeek * 0.95);
 
         const posAlpha = 1 - Math.exp(-15.0 * safeDt);
@@ -639,6 +1195,14 @@ export class SceneManager {
         this.camLook.x = THREE.MathUtils.lerp(this.camLook.x, desiredLookX, posAlpha);
         this.camLook.y = THREE.MathUtils.lerp(this.camLook.y, desiredLookY, yAlpha);
         this.camLook.z = THREE.MathUtils.lerp(this.camLook.z, desiredLookZ, posAlpha);
+      }
+
+      // Guard against non-finite camera vectors poisoning Three.js matrices
+      if (!Number.isFinite(this.camPos.x) || !Number.isFinite(this.camPos.y) || !Number.isFinite(this.camPos.z)) {
+        this.camPos.set(kx - Math.sin(kyaw) * 6.2, ky + 2.8, kz - Math.cos(kyaw) * 6.2);
+      }
+      if (!Number.isFinite(this.camLook.x) || !Number.isFinite(this.camLook.y) || !Number.isFinite(this.camLook.z)) {
+        this.camLook.set(kx, ky + 1.0, kz);
       }
 
       // Apply organic camera screen shake
@@ -656,7 +1220,7 @@ export class SceneManager {
     }
 
     this.lastPhase = phase;
-    this.renderer.render(this.scene, this.camera);
+    this._renderFrame(safeDt, desiredTrackId, focusKart, false);
   }
 
   dispose() {
@@ -678,6 +1242,11 @@ export class SceneManager {
       this.ghostKart = null;
     }
 
+    if (this.stage) {
+      this.stage.dispose();
+      this.stage = null;
+    }
+
     if (this.kartManager) {
       this.kartManager.dispose();
       this.kartManager = null;
@@ -691,6 +1260,23 @@ export class SceneManager {
     if (this.trackWorld) {
       this.trackWorld.dispose();
       this.trackWorld = null;
+    }
+
+    if (this.postProcessing) {
+      this.postProcessing.dispose();
+      this.postProcessing = null;
+    }
+
+    if (this.scene) {
+      this.scene.environment = null;
+    }
+    if (this._envRenderTarget) {
+      this._envRenderTarget.dispose();
+      this._envRenderTarget = null;
+    }
+    if (this._pmremGenerator) {
+      this._pmremGenerator.dispose();
+      this._pmremGenerator = null;
     }
 
     if (this.renderer) {

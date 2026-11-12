@@ -1,4 +1,5 @@
 import { RaceSimulation } from '../shared/kartPhysics.js';
+import { projectOnTrack, isArenaTrack, ARENA_DATA, isPointInShortcut } from '../shared/trackData.js';
 import {
   P2PRoomGuest,
   createPrivateP2PHost,
@@ -24,12 +25,13 @@ function cloneState(s) {
       ? s.karts.map((k) => ({
           ...k,
           emote: k.emote ? { ...k.emote } : null,
-          stats: k.stats ? { ...k.stats } : { hitsDealt: 0, timesHit: 0, driftsBoosted: 0, stunts: 0 },
+          stats: k.stats ? { ...k.stats } : { hitsDealt: 0, timesHit: 0, driftsBoosted: 0, stunts: 0, coinsCollected: 0 },
         }))
       : [],
     projectiles: Array.isArray(s.projectiles) ? s.projectiles.map((p) => ({ ...p })) : [],
     explosions: Array.isArray(s.explosions) ? s.explosions.map((e) => ({ ...e })) : [],
     activeItemBoxes: Array.isArray(s.activeItemBoxes) ? [...s.activeItemBoxes] : [],
+    activeCoins: Array.isArray(s.activeCoins) ? [...s.activeCoins] : [],
     events: Array.isArray(s.events) ? s.events.map((e) => ({ ...e })) : [],
   };
 }
@@ -70,6 +72,8 @@ export class GameClient {
     this._targetReceivedAt = 0;
     this._lastSeenEventId = 0;
     this._pendingEvents = [];
+    this._interpKartMap = new Map();
+    this._interpProjMap = new Map();
 
     this._latestInput = {
       steer: 0,
@@ -111,7 +115,17 @@ export class GameClient {
     return Boolean(this.mode === 'solo' && this._paused);
   }
 
-  startSolo({ playerName = 'Pilote', racerId = 'red', botCount = 5, trackId = 'coco' } = {}) {
+  startSolo({
+    playerName = 'Pilote',
+    racerId = 'red',
+    kartId = 'classic',
+    boostColorId = 'flame',
+    botCount = 5,
+    trackId = 'coco',
+    gameFormat = 'race',
+    cc = '100cc',
+    mirror = false,
+  } = {}) {
     this._teardownOnline(false);
 
     this.mode = 'solo';
@@ -127,6 +141,9 @@ export class GameClient {
       roomCode: 'SOLO',
       trackId,
       isPublic: false,
+      gameFormat,
+      cc,
+      mirror,
     });
     if (this._soloChampionId) {
       this.soloSim.championId = this._soloChampionId;
@@ -135,6 +152,8 @@ export class GameClient {
       id: this.localId,
       name: playerName,
       racerId,
+      kartId,
+      boostColorId,
     });
     this.soloSim.setBotCount(botCount);
     this.soloSim.startCountdown();
@@ -162,6 +181,12 @@ export class GameClient {
     if (typeof WebSocket === 'undefined' || typeof window === 'undefined') {
       return false;
     }
+    const explicitWsUrl =
+      typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_WS_URL;
+    if (!isLocalDevHost() && !explicitWsUrl) {
+      this._wsUnavailable = true;
+      return false;
+    }
     if (this._wsUnavailable && !isLocalDevHost()) {
       return false;
     }
@@ -177,7 +202,16 @@ export class GameClient {
     }
   }
 
-  async createRoom({ playerName = 'Pilote', racerId = 'red', trackId = 'coco' } = {}) {
+  async createRoom({
+    playerName = 'Pilote',
+    racerId = 'red',
+    kartId = 'classic',
+    boostColorId = 'flame',
+    trackId = 'coco',
+    gameFormat = 'race',
+    cc = '100cc',
+    mirror = false,
+  } = {}) {
     this._cleanupSolo();
     this._paused = false;
 
@@ -188,7 +222,12 @@ export class GameClient {
         type: 'create_room',
         playerName,
         racerId,
+        kartId,
+        boostColorId,
         trackId,
+        gameFormat,
+        cc,
+        mirror,
       });
       return { roomCode: res.roomCode, isPublic: false };
     }
@@ -198,7 +237,12 @@ export class GameClient {
     const { host, roomCode } = await createPrivateP2PHost({
       playerName,
       racerId,
+      kartId,
+      boostColorId,
       trackId,
+      gameFormat,
+      cc,
+      mirror,
       PeerClass: this._PeerClass,
       onState: (st) => {
         this.state = st;
@@ -225,7 +269,7 @@ export class GameClient {
     return { roomCode, isPublic: false };
   }
 
-  async joinRoom({ roomCode, playerName = 'Pilote', racerId = 'red' } = {}) {
+  async joinRoom({ roomCode, playerName = 'Pilote', racerId = 'red', kartId = 'classic', boostColorId = 'flame' } = {}) {
     const cleanCode = String(roomCode || '')
       .trim()
       .toUpperCase()
@@ -246,6 +290,8 @@ export class GameClient {
         roomCode: cleanCode,
         playerName,
         racerId,
+        kartId,
+        boostColorId,
       });
       return { roomCode: res.roomCode, isPublic: Boolean(res.isPublic) };
     }
@@ -269,6 +315,8 @@ export class GameClient {
       joinType: 'join_room',
       playerName,
       racerId,
+      kartId,
+      boostColorId,
     });
 
     this.mode = 'online';
@@ -289,7 +337,16 @@ export class GameClient {
     };
   }
 
-  async joinPublicMatch({ playerName = 'Pilote', racerId = 'red', trackId = 'coco' } = {}) {
+  async joinPublicMatch({
+    playerName = 'Pilote',
+    racerId = 'red',
+    kartId = 'classic',
+    boostColorId = 'flame',
+    trackId = 'coco',
+    gameFormat = 'race',
+    cc = '100cc',
+    mirror = false,
+  } = {}) {
     this._cleanupSolo();
     this._paused = false;
 
@@ -300,7 +357,12 @@ export class GameClient {
         type: 'join_public',
         playerName,
         racerId,
+        kartId,
+        boostColorId,
         trackId,
+        gameFormat,
+        cc,
+        mirror,
       });
       return { roomCode: res.roomCode, isPublic: true };
     }
@@ -310,7 +372,12 @@ export class GameClient {
     const match = await joinPublicP2PMatch({
       playerName,
       racerId,
+      kartId,
+      boostColorId,
       trackId,
+      gameFormat,
+      cc,
+      mirror,
       PeerClass: this._PeerClass,
       onHostState: (st) => {
         this.state = st;
@@ -379,6 +446,50 @@ export class GameClient {
 
   setTrack(trackId) {
     this.selectTrack(trackId);
+  }
+
+  setRoomOptions(opts = {}) {
+    if (this.mode === 'solo' && this.soloSim) {
+      this.soloSim.setRoomOptions(opts);
+      this.state = this.soloSim.getState({
+        localId: this.localId,
+        sinceEventId: this._lastSeenEventId,
+      });
+      this.state.paused = this._paused;
+      this._lastSeenEventId = this.soloSim.getLatestEventId();
+      this.onState?.(this.state);
+      return;
+    }
+
+    if (this.mode === 'online') {
+      if (this._onlineTransport === 'p2p-host' && this._p2pHost) {
+        this._p2pHost.setRoomOptions(opts);
+      } else {
+        this._sendOnlineMessage({ type: 'set_room_options', ...opts });
+      }
+    }
+  }
+
+  updateLoadout(opts = {}) {
+    if (this.mode === 'solo' && this.soloSim && this.localId) {
+      this.soloSim.updatePlayerLoadout(this.localId, opts);
+      this.state = this.soloSim.getState({
+        localId: this.localId,
+        sinceEventId: this._lastSeenEventId,
+      });
+      this.state.paused = this._paused;
+      this._lastSeenEventId = this.soloSim.getLatestEventId();
+      this.onState?.(this.state);
+      return;
+    }
+
+    if (this.mode === 'online') {
+      if (this._onlineTransport === 'p2p-host' && this._p2pHost) {
+        this._p2pHost.updateLoadout(opts);
+      } else {
+        this._sendOnlineMessage({ type: 'update_loadout', ...opts });
+      }
+    }
   }
 
   requestRespawn() {
@@ -697,6 +808,12 @@ export class GameClient {
     this.state.isPublic = target.isPublic;
     this.state.publicCountdown = target.publicCountdown;
     this.state.trackId = target.trackId;
+    this.state.gameFormat = target.gameFormat;
+    this.state.cc = target.cc;
+    this.state.mirror = target.mirror;
+    this.state.knockoutTimer = target.knockoutTimer;
+    this.state.aliveCount = target.aliveCount;
+    this.state.battleTimeRemaining = target.battleTimeRemaining;
     this.state.championId = target.championId;
     this.state.hostId = target.hostId;
     this.state.localId = localId;
@@ -704,6 +821,7 @@ export class GameClient {
     this.state.countdown = target.countdown;
     this.state.countdownRemaining = target.countdownRemaining;
     this.state.activeItemBoxes = [...target.activeItemBoxes];
+    this.state.activeCoins = Array.isArray(target.activeCoins) ? [...target.activeCoins] : [];
     this.state.paused = false;
 
     if (target.phase === 'racing') {
@@ -721,15 +839,33 @@ export class GameClient {
     const localPosBlend = 1 - Math.exp(-11 * dt);
     const localYawBlend = 1 - Math.exp(-9 * dt);
 
-    const prevKartsById = new Map(this.state.karts.map((k) => [k.id, k]));
-    this.state.karts = target.karts.map((tk) => {
+    const prevKartsById = this._interpKartMap;
+    prevKartsById.clear();
+    if (Array.isArray(this.state.karts)) {
+      for (let i = 0; i < this.state.karts.length; i++) {
+        const k = this.state.karts[i];
+        if (k && k.id != null) prevKartsById.set(k.id, k);
+      }
+    }
+
+    const targetKarts = target.karts || [];
+    if (!Array.isArray(this.state.karts)) {
+      this.state.karts = [];
+    }
+    this.state.karts.length = targetKarts.length;
+
+    for (let i = 0; i < targetKarts.length; i++) {
+      const tk = targetKarts[i];
       const ck = prevKartsById.get(tk.id);
       if (!ck || target.phase === 'lobby') {
-        return {
-          ...tk,
-          emote: tk.emote ? { ...tk.emote } : null,
-          stats: tk.stats ? { ...tk.stats } : { hitsDealt: 0, timesHit: 0, driftsBoosted: 0, stunts: 0 },
-        };
+        const nextK = ck || {};
+        Object.assign(nextK, tk);
+        nextK.emote = tk.emote ? Object.assign(nextK.emote || {}, tk.emote) : null;
+        nextK.stats = tk.stats
+          ? Object.assign(nextK.stats || {}, tk.stats)
+          : { hitsDealt: 0, timesHit: 0, driftsBoosted: 0, stunts: 0 };
+        this.state.karts[i] = nextK;
+        continue;
       }
 
       let curX = ck.x;
@@ -781,6 +917,28 @@ export class GameClient {
           curZ += (predZ - curZ) * localPosBlend;
           curYaw = wrapAngle(curYaw + wrapAngle(tk.yaw - curYaw) * localYawBlend);
         }
+
+        // Prevent client prediction from visually poking outside physical track guardrails or arena rim
+        if (isArenaTrack(target.trackId)) {
+          const wallR = ARENA_DATA.radius - 1.3;
+          const r = Math.hypot(curX, curZ);
+          if (r > wallR) {
+            curX = (curX / r) * wallR;
+            curZ = (curZ / r) * wallR;
+          }
+        } else {
+          const visProj = projectOnTrack(curX, curZ, target.trackId || 'coco');
+          const visWall = (visProj.sample.roadHalfWidth || 7.5) - 0.25;
+          if (
+            visProj.sample.hasGuardrail !== false &&
+            Math.abs(visProj.lateralOffset) > visWall &&
+            !isPointInShortcut(visProj.t, visProj.lateralOffset, target.trackId || 'coco')
+          ) {
+            const sign = visProj.lateralOffset >= 0 ? 1 : -1;
+            curX = visProj.sample.x + visProj.sample.nx * sign * visWall;
+            curZ = visProj.sample.z + visProj.sample.nz * sign * visWall;
+          }
+        }
       } else {
         if (target.phase === 'racing' && tk.fallTimer <= 0) {
           curX += Math.sin(curYaw) * ck.speed * dt;
@@ -813,26 +971,45 @@ export class GameClient {
           ? tk.item
           : tk.shieldItem;
 
-      return {
-        ...tk,
-        x: curX,
-        y: curY,
-        z: curZ,
-        yaw: curYaw,
-        steer: curSteer,
-        hopOffset: curHop,
-        stuntTimer: curStunt,
-        shieldItem,
-        emote: tk.emote ? { ...tk.emote } : null,
-        stats: tk.stats ? { ...tk.stats } : { hitsDealt: 0, timesHit: 0, driftsBoosted: 0, stunts: 0 },
-      };
-    });
+      const prevEmote = ck.emote;
+      const prevStats = ck.stats;
+      Object.assign(ck, tk);
+      ck.x = curX;
+      ck.y = curY;
+      ck.z = curZ;
+      ck.yaw = curYaw;
+      ck.steer = curSteer;
+      ck.hopOffset = curHop;
+      ck.stuntTimer = curStunt;
+      ck.shieldItem = shieldItem;
+      ck.emote = tk.emote ? Object.assign(prevEmote || {}, tk.emote) : null;
+      ck.stats = tk.stats
+        ? Object.assign(prevStats || {}, tk.stats)
+        : { hitsDealt: 0, timesHit: 0, driftsBoosted: 0, stunts: 0 };
+      this.state.karts[i] = ck;
+    }
 
-    const prevProjById = new Map(this.state.projectiles.map((p) => [p.id, p]));
-    this.state.projectiles = target.projectiles.map((tp) => {
+    const prevProjById = this._interpProjMap;
+    prevProjById.clear();
+    if (Array.isArray(this.state.projectiles)) {
+      for (let i = 0; i < this.state.projectiles.length; i++) {
+        const p = this.state.projectiles[i];
+        if (p && p.id != null) prevProjById.set(p.id, p);
+      }
+    }
+
+    const targetProjs = target.projectiles || [];
+    if (!Array.isArray(this.state.projectiles)) {
+      this.state.projectiles = [];
+    }
+    this.state.projectiles.length = targetProjs.length;
+
+    for (let i = 0; i < targetProjs.length; i++) {
+      const tp = targetProjs[i];
       const cp = prevProjById.get(tp.id);
       if (!cp || tp.type === 'banana') {
-        return { ...tp };
+        this.state.projectiles[i] = Object.assign(cp || {}, tp);
+        continue;
       }
       const shellSpeed =
         tp.type === 'blue_shell' ? 76 : tp.type === 'green_shell' ? 68 : 64;
@@ -842,24 +1019,31 @@ export class GameClient {
       const predZ = tp.z + Math.cos(tp.yaw) * shellSpeed * ageSec;
       const errSq = (predX - curX) * (predX - curX) + (predZ - curZ) * (predZ - curZ);
 
-      if (errSq > 16 * 16) {
-        return { ...tp };
+      Object.assign(cp, tp);
+      if (errSq <= 16 * 16) {
+        cp.x = curX + (predX - curX) * remoteBlend;
+        cp.y = cp.y + (tp.y - cp.y) * remoteBlend;
+        cp.z = curZ + (predZ - curZ) * remoteBlend;
+        cp.yaw = wrapAngle(cp.yaw + wrapAngle(tp.yaw - cp.yaw) * remoteBlend);
       }
-      return {
-        ...tp,
-        x: curX + (predX - curX) * remoteBlend,
-        y: cp.y + (tp.y - cp.y) * remoteBlend,
-        z: curZ + (predZ - curZ) * remoteBlend,
-        yaw: wrapAngle(cp.yaw + wrapAngle(tp.yaw - cp.yaw) * remoteBlend),
-      };
-    });
+      this.state.projectiles[i] = cp;
+    }
 
-    this.state.explosions = (target.explosions || [])
-      .map((te) => ({
-        ...te,
-        timer: Math.max(0, te.timer - ageSec),
-      }))
-      .filter((te) => te.timer > 0);
+    const targetExps = target.explosions || [];
+    if (!Array.isArray(this.state.explosions)) {
+      this.state.explosions = [];
+    }
+    let expWriteIdx = 0;
+    for (let i = 0; i < targetExps.length; i++) {
+      const te = targetExps[i];
+      const nextTimer = Math.max(0, te.timer - ageSec);
+      if (nextTimer <= 0) continue;
+      const slot = this.state.explosions[expWriteIdx] || {};
+      Object.assign(slot, te);
+      slot.timer = nextTimer;
+      this.state.explosions[expWriteIdx++] = slot;
+    }
+    this.state.explosions.length = expWriteIdx;
   }
 
   _cleanupSolo() {
